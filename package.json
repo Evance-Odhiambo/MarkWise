@@ -1,0 +1,35 @@
+{
+  "name": "markwise-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "dev:web": "turbo run dev --filter=@markwise/web",
+    "dev:mobile": "npm run start --workspace=apps/mobile",
+    "build": "turbo run build",
+    "build:web": "turbo run build --filter=@markwise/web",
+    "start": "turbo run start",
+    "start:web": "turbo run start --filter=@markwise/web",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "clean": "turbo run clean",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f",
+    "docker:rebuild": "docker-compose up -d --build",
+    "prisma:generate": "turbo run prisma:generate",
+    "prisma:push": "turbo run prisma:push",
+    "prisma:migrate": "turbo run prisma:migrate"
+  },
+  "devDependencies": {
+    "effect": "^3.22.0",
+    "turbo": "^2.3.4"
+  },
+  "packageManager": "npm@10.9.2",
+  "engines": {
+    "node": ">=22.11.0"
+  }
+}

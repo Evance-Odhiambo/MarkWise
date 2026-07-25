@@ -1,0 +1,18 @@
+{
+  "name": "MarkWise",
+  "displayName": "MarkWise",
+  "version": "1.0.0",
+  "buildNumber": 1,
+  "description": "Smart attendance and academic management platform for lecturers and students.",
+  "author": "MarkWise Team",
+  "android": {
+    "package": "com.markwise",
+    "versionCode": 1,
+    "versionName": "1.0.0"
+  },
+  "ios": {
+    "bundleIdentifier": "com.markwise",
+    "buildNumber": "1",
+    "marketingVersion": "1.0.0"
+  }
+}

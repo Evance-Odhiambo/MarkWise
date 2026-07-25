@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  iOS Export Options for App Store Connect submission.
+
+  Usage (after archiving):
+    npm run build:ios:ipa
+
+  Or manually:
+    xcodebuild -exportArchive \
+      -archivePath ios/build/MarkWise.xcarchive \
+      -exportOptionsPlist ios/ExportOptions.plist \
+      -exportPath ios/build/
+
+  Before exporting, set your Apple Team ID and provisioning profile name below.
+  These values come from your Apple Developer account at developer.apple.com.
+-->
+<plist version="1.0">
+<dict>
+  <!-- "app-store" for production, "ad-hoc" for testing on specific devices,
+       "enterprise" for in-house distribution, "development" for debug. -->
+  <key>method</key>
+  <string>app-store</string>
+
+  <!-- Your 10-character Apple Team ID (found in developer.apple.com → Membership) -->
+  <key>teamID</key>
+  <string>REPLACE_WITH_YOUR_TEAM_ID</string>
+
+  <!-- Upload the IPA directly to App Store Connect after export -->
+  <key>uploadBitcode</key>
+  <false/>
+  <key>uploadSymbols</key>
+  <true/>
+  <key>compileBitcode</key>
+  <false/>
+
+  <!-- Signing: "automatic" lets Xcode pick the profile, or specify manually -->
+  <key>signingStyle</key>
+  <string>automatic</string>
+
+  <!--
+  To use manual signing instead, replace the signingStyle block above with:
+    <key>signingStyle</key>
+    <string>manual</string>
+    <key>provisioningProfiles</key>
+    <dict>
+      <key>com.markwise</key>
+      <string>MarkWise App Store Distribution</string>
+    </dict>
+  -->
+
+  <key>destination</key>
+  <string>export</string>
+</dict>
+</plist>

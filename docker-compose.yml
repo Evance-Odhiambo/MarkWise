@@ -1,0 +1,17 @@
+
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: markwise_postgres
+    environment:
+      POSTGRES_USER: markwise
+      POSTGRES_PASSWORD: markwise_dev_password
+      POSTGRES_DB: markwise
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

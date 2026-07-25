@@ -1,0 +1,10 @@
+version: "2"
+authtoken: YOUR_NGROK_AUTH_TOKEN
+region: us
+
+tunnels:
+  web:
+    proto: http
+    addr: 3000
+    inspect: true
+    bind_tls: true

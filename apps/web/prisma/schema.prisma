@@ -1,0 +1,1138 @@
+// prisma/schema.prisma
+
+model Group {
+  id                  String        @id @default(uuid())
+  name                String
+  unitId              String?
+  unitCode            String? // denormalized for fast lookup
+  groupNumber         Int           @default(0) // 1-indexed per unit; stable BLE delegation byte
+  leaderId            String?
+  locked              Boolean       @default(false)
+  capacity            Int           @default(30)
+  description         String?
+  allowSelfEnroll     Boolean       @default(true)
+  maxGroupsPerStudent Int           @default(1)
+  nextMeeting         DateTime?
+  tags                String[]      @default([])
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  members             GroupMember[]
+  submissions         Submission[]
+  unit                Unit?         @relation(fields: [unitId], references: [id])
+
+  @@index([unitId])
+  @@index([unitCode])
+  @@map("Group")
+}
+
+model GroupMember {
+  id        String    @id @default(uuid())
+  groupId   String
+  studentId String
+  role      String    @default("member") // 'leader' | 'member'
+  joinedAt  DateTime  @default(now())
+  leftAt    DateTime?
+  group     Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  student   Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([groupId])
+  @@index([studentId])
+  @@map("GroupMember")
+}
+
+model Assignment {
+  id              String       @id @default(uuid())
+  title           String
+  description     String?
+  dueDate         DateTime
+  unitId          String
+  lecturerId      String
+  type            String       @default("individual")
+  isGroup         Boolean      @default(false)
+  allowedTypes    String[]     @default(["file", "link", "text"])
+  blockLate       Boolean      @default(false)
+  allowResub      Boolean      @default(true)
+  attemptsAllowed Int          @default(1)
+  maxScore        Int?
+  status          String       @default("active")
+  rubric          Json?
+  attachments     Json?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  submissions     Submission[]
+
+  @@index([unitId])
+  @@index([lecturerId])
+  @@map("Assignment")
+}
+
+model Submission {
+  id              String           @id @default(uuid())
+  assignmentId    String
+  studentId       String?
+  groupId         String?
+  type            String           @default("file")
+  fileUrl         String?
+  fileName        String?
+  mimeType        String?
+  linkUrl         String?
+  textContent     String?
+  submittedByName String?
+  submittedAt     DateTime         @default(now())
+  version         Int              @default(1)
+  status          SubmissionStatus @default(pending)
+  grade           Float?
+  feedback        String?
+  assignment      Assignment       @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  student         Student?         @relation(fields: [studentId], references: [id])
+  group           Group?           @relation(fields: [groupId], references: [id])
+
+  @@index([assignmentId])
+  @@index([studentId])
+  @@map("Submission")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Material {
+  id          String         @id @default(uuid())
+  unitId      String
+  lecturerId  String
+  title       String
+  description String?
+  type        String         @default("file")
+  fileUrl     String?
+  linkUrl     String?
+  textContent String?
+  mimeType    String?
+  fileSize    Int?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  unit        Unit           @relation(fields: [unitId], references: [id])
+  views       MaterialView[]
+
+  @@index([unitId])
+  @@index([lecturerId])
+  @@map("Material")
+}
+
+model MaterialView {
+  id               String   @id @default(uuid())
+  materialId       String
+  studentId        String
+  viewedAt         DateTime @default(now()) @updatedAt
+  timeSpentSeconds Int?
+  material         Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  student          Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([materialId, studentId])
+  @@index([materialId])
+  @@index([studentId])
+  @@map("MaterialView")
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Institution {
+  id                String                  @id @default(uuid())
+  name              String
+  logoUrl           String?
+  metadata          Json?                   @default("{}")
+  settings          Json?                   @default("{}")
+  admins            Admin[]
+  departments       Department[]
+  lecturers         Lecturer[]
+  mappingSets       InstitutionMappingSet[]
+  facilitiesManager FacilitiesManager?
+  students          Student[]
+  campuses          Campus[]
+
+  @@map("Institution")
+}
+
+// ── Campus hierarchy ───────────────────────────────────────────────────────────
+
+// Top-level physical location under an institution (e.g. "Main Campus", "City Campus").
+model Campus {
+  id             String          @id @default(uuid())
+  name           String // "Main Campus"
+  code           String? // optional short code, e.g. "MAIN"
+  institutionId  String
+  institution    Institution     @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  buildings      Building[]
+  sharedSessions SharedSession[]
+  admins         Admin[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@unique([institutionId, name])
+  @@index([institutionId])
+  @@map("Campus")
+}
+
+// Named building on a campus (e.g. "Human Resource Development", code "HRD").
+// The display roomCode is derived at query time: `${building.code} ${room.number}`
+model Building {
+  id        String   @id @default(uuid())
+  name      String // "Human Resource Development"
+  code      String // "HRD" — used to derive room display codes
+  campusId  String
+  campus    Campus   @relation(fields: [campusId], references: [id], onDelete: Cascade)
+  floors    Floor[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([campusId, code])
+  @@index([campusId])
+  @@map("Building")
+}
+
+// Floor within a building. level 0 = ground floor.
+model Floor {
+  id         String   @id @default(uuid())
+  name       String // "Ground", "First", "Second"
+  level      Int // 0, 1, 2…
+  buildingId String
+  building   Building @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  rooms      Room[]
+
+  @@unique([buildingId, level])
+  @@index([buildingId])
+  @@map("Floor")
+}
+
+model Department {
+  id              String           @id @default(uuid())
+  name            String
+  institutionId   String
+  admins          Admin[]
+  courses         Course[]
+  institution     Institution      @relation(fields: [institutionId], references: [id])
+  programs        Program[]
+  students        Student[]
+  units           Unit[]
+  departmentUnits DepartmentUnit[]
+
+  @@unique([name, institutionId])
+  @@index([institutionId])
+  @@map("Department")
+}
+
+model Program {
+  id            String      @id @default(uuid())
+  name          String
+  durationYears Int
+  departmentId  String
+  courses       Course[]
+  department    Department  @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  years         YearBlock[]
+
+  @@index([departmentId])
+  @@map("Program")
+}
+
+model Course {
+  id                String             @id @default(uuid())
+  code              String             @unique
+  name              String
+  departmentId      String
+  programId         String
+  program           Program            @relation(fields: [programId], references: [id], onDelete: Cascade)
+  department        Department         @relation(fields: [departmentId], references: [id])
+  students          Student[]
+  timetableVersions TimetableVersion[]
+  years             YearBlock[]
+  units             Unit[]             @relation("CourseUnits")
+  unitOfferings     UnitOffering[]
+
+  @@index([departmentId])
+  @@index([programId])
+  @@map("Course")
+}
+
+model YearBlock {
+  id        String     @id @default(uuid())
+  name      String
+  courseId  String
+  programId String
+  semesters Semester[]
+  course    Course     @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  program   Program    @relation(fields: [programId], references: [id], onDelete: Cascade)
+
+  @@index([courseId])
+  @@index([programId])
+  @@map("YearBlock")
+}
+
+model Semester {
+  id     String    @id @default(uuid())
+  label  String
+  yearId String
+  year   YearBlock @relation(fields: [yearId], references: [id], onDelete: Cascade)
+  units  Unit[]    @relation("SemesterUnits")
+
+  @@index([yearId])
+  @@map("Semester")
+}
+
+
+
+model Unit {
+  id              String           @id @default(uuid())
+  bleId           Int?             @unique
+  code            String           @unique
+  title           String
+  departmentId    String
+  bleMetadata     Json?            @default("{}")
+  lastSyncAt      DateTime?
+  syncVersion     Int?             @default(0)
+  enrollments     Enrollment[]
+  department      Department       @relation(fields: [departmentId], references: [id])
+  semesters       Semester[]       @relation("SemesterUnits")
+  courses         Course[]         @relation("CourseUnits")
+  groups          Group[]
+  materials       Material[]
+  departmentUnits DepartmentUnit[]
+  offerings       UnitOffering[]
+
+  @@index([bleId])
+  @@index([departmentId])
+  @@map("Unit")
+}
+
+model DepartmentUnit {
+  id           String     @id @default(cuid())
+  departmentId String
+  unitId       String
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  unit         Unit       @relation(fields: [unitId], references: [id], onDelete: Cascade)
+
+  @@unique([departmentId, unitId])
+  @@index([departmentId])
+  @@index([unitId])
+  @@map("DepartmentUnit")
+}
+
+model Admin {
+  id            String               @id @default(uuid())
+  fullName      String
+  email         String               @unique
+  password      String
+  role          AdminRole
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  institutionId String?
+  departmentId  String?
+  campusId      String?
+  department    Department?          @relation(fields: [departmentId], references: [id])
+  institution   Institution?         @relation(fields: [institutionId], references: [id])
+  campus        Campus?              @relation(fields: [campusId], references: [id])
+  resetTokens   PasswordResetToken[]
+
+  @@index([institutionId])
+  @@index([departmentId])
+  @@index([campusId])
+  @@map("Admin")
+}
+
+model Lecturer {
+  id              String                   @id @default(uuid())
+  fullName        String
+  email           String                   @unique
+  phoneNumber     String?
+  passwordHash    String
+  createdAt       DateTime                 @default(now())
+  institutionId   String
+  fcmToken        String?                  @map("fcm_token")
+  holds           BookingHold[]
+  institution     Institution              @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  auth            LecturerAuth?
+  timetables      Timetable[]
+  extraSessions   ExtraSession[]
+  unitAssignments LecturerUnitAssignment[]
+
+  @@index([institutionId])
+  @@map("Lecturer")
+}
+
+model Student {
+  id                       String                    @id @default(uuid())
+  name                     String
+  admissionNumber          String
+  courseId                 String
+  departmentId             String
+  institutionId            String
+  email                    String?                   @unique
+  year                     Int
+  pushToken                String?                   @map("push_token")
+  pushTokens               StudentPushToken[]
+  achievementNotifications AchievementNotification[]
+  attendanceRecords        AttendanceRecord[]
+  enrollments              Enrollment[]
+  materialViews            MaterialView[]
+  course                   Course                    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  department               Department                @relation(fields: [departmentId], references: [id])
+  institution              Institution               @relation(fields: [institutionId], references: [id])
+  auth                     StudentAuth?
+  groupMemberships         GroupMember[]
+  submissions              Submission[]
+  points                   StudentPoints?
+
+  @@unique([institutionId, admissionNumber])
+  @@index([institutionId])
+  @@index([courseId])
+  @@index([departmentId])
+  @@map("Student")
+}
+
+model StudentPushToken {
+  id        String   @id @default(uuid())
+  studentId String
+  fcmToken  String
+  platform  String? // 'android' | 'ios'
+  updatedAt DateTime @updatedAt
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, fcmToken])
+  @@index([studentId])
+  @@map("StudentPushToken")
+}
+
+// One row per (student, badge). Tracks in-app delivery and FCM send state
+// so neither repeats regardless of how many times the achievements endpoint is called.
+model AchievementNotification {
+  id          String    @id @default(uuid())
+  studentId   String
+  badgeId     String
+  badgeName   String    @default("")
+  points      Int       @default(0)
+  earnedAt    DateTime  @default(now())
+  delivered   Boolean   @default(false) // true after the GET response has carried it once
+  deliveredAt DateTime?
+  fcmSent     Boolean   @default(false) // true after FCM push has been sent once
+  fcmSentAt   DateTime?
+  student     Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, badgeId])
+  @@index([studentId, delivered])
+  @@index([studentId, fcmSent])
+  @@map("AchievementNotification")
+}
+
+model Room {
+  id                String             @id @default(uuid())
+  // ── BLE offline-attendance fields — DO NOT REMOVE ─────────────────────────
+  bleId             Int?               @unique // maps to ConductedSession.bleRoomId
+  bleMetadata       Json?              @default("{}")
+  lastSyncAt        DateTime?
+  syncVersion       Int?               @default(0)
+  // ── Flat fields (kept for backward compat; also used by BLE sync routes) ──
+  institutionId     String
+  buildingCode      String
+  roomCode          String
+  name              String
+  capacity          Int
+  type              String // legacy string type
+  floor             Int                @default(0) // legacy floor integer
+  // ── Typed / hierarchy fields ───────────────────────────────────────────────
+  roomType          RoomType           @default(CLASSROOM)
+  floorId           String? // FK → Floor (null until migrated to hierarchy)
+  // ── Status ────────────────────────────────────────────────────────────────
+  status            RoomStatus         @default(free)
+  isActive          Boolean            @default(true)
+  // ── Timestamps ────────────────────────────────────────────────────────────
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  // ── Relations ─────────────────────────────────────────────────────────────
+  buildingFloor     Floor?             @relation(fields: [floorId], references: [id])
+  attendanceRecords AttendanceRecord[]
+  holds             BookingHold[]
+  roomReservations  RoomReservation[]
+  sharedSessions    SharedSession[]
+  extraSessions     ExtraSession[]     @relation("ExtraSessionRoom")
+
+  @@unique([institutionId, buildingCode, roomCode])
+  @@index([institutionId, buildingCode])
+  @@index([bleId])
+  @@index([institutionId, isActive, status])
+  @@index([floorId])
+  @@map("Room")
+}
+
+model BLESyncLog {
+  id            String    @id @default(uuid())
+  institutionId String
+  syncType      String
+  status        String
+  unitsSynced   Int?
+  roomsSynced   Int?
+  errors        Json?
+  startedAt     DateTime  @default(now())
+  completedAt   DateTime?
+  triggeredBy   String?
+  deviceInfo    Json?
+
+  @@index([institutionId])
+  @@index([startedAt])
+  @@map("BLESyncLog")
+}
+
+// Academic timetable no longer uses Booking — room allocation is via SharedSession.
+// Booking replaced by RoomReservation for non-academic use (meetings, events, maintenance).
+model RoomReservation {
+  id         String   @id @default(uuid())
+  roomId     String
+  reservedBy String // userId: admin, lecturer, or facilities manager id
+  startAt    DateTime
+  endAt      DateTime
+  purpose    String // "meeting" | "event" | "maintenance" | "exam" | etc.
+  notes      String?
+  status     String   @default("active") // "active" | "cancelled" | "completed"
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  room Room @relation(fields: [roomId], references: [id])
+
+  @@index([roomId])
+  @@index([roomId, startAt, endAt])
+  @@index([reservedBy])
+  @@map("RoomReservation")
+}
+
+model BookingHold {
+  id         String            @id @default(uuid())
+  roomId     String
+  lecturerId String?
+  status     BookingHoldStatus
+  startAt    DateTime
+  endAt      DateTime
+  expiresAt  DateTime
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+  lecturer   Lecturer?         @relation(fields: [lecturerId], references: [id])
+  room       Room              @relation(fields: [roomId], references: [id])
+
+  @@index([roomId])
+  @@index([roomId, status])
+  @@map("BookingHold")
+}
+
+// A single assignment: "this lecturer teaches this unit offering."
+// Scheduling lives in SharedSession (via sharedSessionId).
+// When a lesson is cancelled/online/rescheduled, sharedSessionId is cleared
+// and originalSharedSessionId holds the original for restoration.
+model Timetable {
+  id                      String          @id @default(uuid())
+  unitOfferingId          String?
+  lecturerId              String
+  sharedSessionId         String?
+  timetableStatus         TimetableStatus @default(DRAFT)
+  reason                  String? // cancellation / online note
+  originalSharedSessionId String? // saved before status change, restored on confirm
+  createdAt               DateTime        @default(now())
+  updatedAt               DateTime        @updatedAt
+
+  unitOffering  UnitOffering?  @relation(fields: [unitOfferingId], references: [id])
+  lecturer      Lecturer       @relation(fields: [lecturerId], references: [id])
+  sharedSession SharedSession? @relation(fields: [sharedSessionId], references: [id])
+
+  @@index([unitOfferingId])
+  @@index([sharedSessionId])
+  @@index([lecturerId])
+  @@map("Timetable")
+}
+
+model OnlineAttendanceSession {
+  id         String                   @id @default(uuid())
+  lecturerId String
+  unitCode   String
+  type       String                   @default("online")
+  status     String                   @default("active")
+  expiresAt  DateTime
+  endedAt    DateTime?
+  createdAt  DateTime                 @default(now())
+  records    OnlineAttendanceRecord[]
+
+  @@index([lecturerId])
+  @@index([status])
+  @@index([status, expiresAt])
+  @@map("OnlineAttendanceSession")
+}
+
+model OnlineAttendanceRecord {
+  id              String                  @id @default(uuid())
+  sessionId       String
+  studentId       String
+  admissionNumber String
+  unitCode        String                  @default("")
+  deviceId        String?
+  markedAt        DateTime                @default(now())
+  session         OnlineAttendanceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, studentId])
+  @@unique([sessionId, deviceId])
+  @@index([sessionId])
+  @@index([studentId])
+  @@index([unitCode])
+  @@index([unitCode, markedAt])
+  @@map("OnlineAttendanceRecord")
+}
+
+model StudentAuth {
+  id           String   @id @default(uuid())
+  studentId    String   @unique
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  student      Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@map("StudentAuth")
+}
+
+model LecturerAuth {
+  id           String   @id @default(uuid())
+  lecturerId   String   @unique
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  lecturer     Lecturer @relation(fields: [lecturerId], references: [id], onDelete: Cascade)
+
+  @@map("LecturerAuth")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  adminId   String
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  admin     Admin    @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId])
+  @@map("PasswordResetToken")
+}
+
+model Enrollment {
+  id        String  @id @default(uuid())
+  studentId String
+  unitId    String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  unit      Unit    @relation(fields: [unitId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, unitId])
+  @@index([unitId])
+  @@index([studentId])
+  @@map("Enrollment")
+}
+
+model MeetingInvite {
+  id           String   @id @default(uuid())
+  lecturerId   String
+  lecturerName String
+  unitCode     String
+  unitName     String
+  meetingLink  String
+  passcode     String?
+  scheduledAt  DateTime
+  message      String?
+  createdAt    DateTime @default(now())
+
+  @@index([unitCode, scheduledAt])
+  @@map("MeetingInvite")
+}
+
+model AttendanceRecord {
+  id        String   @id @default(uuid())
+  studentId String
+  date      DateTime
+  status    String
+  createdAt DateTime @default(now())
+  roomId    String
+  room      Room     @relation(fields: [roomId], references: [id])
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId])
+  @@index([roomId])
+  @@index([studentId, date])
+  @@map("AttendanceRecord")
+}
+
+// Tracks lecturer-initiated class sessions (QR/BLE/Manual PIN attendance windows)
+model ConductedSession {
+  id                String                    @id @default(uuid())
+  unitCode          String
+  lectureRoom       String
+  lessonType        String? // LEC | GD | RAT | CAT | LAB | SEM | WRK | TUT
+  sessionStart      DateTime
+  sessionEnd        DateTime?
+  lecturerId        String
+  // mwv1 crypto fields — synced from lecturer app via conducted-sessions/sync
+  sessionKey        String? // 64-char hex; null until synced from lecturer device
+  sessionNonce      BigInt                    @default(0) // uint32 CSPRNG; 0 = legacy stub
+  sessionDuration   Int                       @default(3600) // seconds
+  bleUnitId         Int? // Unit.bleId (0–7999)
+  bleRoomId         Int? // Room.bleId (8000–9999)
+  createdAt         DateTime                  @default(now())
+  attendanceRecords OfflineAttendanceRecord[]
+
+  @@unique([unitCode, lectureRoom, sessionStart])
+  @@index([unitCode])
+  @@index([lecturerId])
+  @@map("ConductedSession")
+}
+
+// Offline attendance records (QR, BLE, Manual PIN)
+model OfflineAttendanceRecord {
+  id                 String            @id @default(uuid())
+  studentId          String
+  unitCode           String
+  lectureRoom        String
+  lessonType         String? // inherited from ConductedSession
+  sessionStart       DateTime
+  scannedAt          DateTime
+  deviceId           String?
+  rawPayload         String?
+  method             String // 'qr' | 'ble' | 'manual' | 'manual_lecturer'
+  delegationId       String? // set if this record came from a GD delegation session
+  admissionNumber    String? // populated for manual_lecturer records
+  markedByLecturerId String? // audit trail — populated for manual_lecturer records
+  institutionId      String? // denormalised for scoping/analytics
+  // mwv1 crypto audit fields
+  conductedSessionId String? // FK → ConductedSession.id (null on legacy stubs)
+  token              String? // 64-char hex HMAC submitted by QR
+  counter            Int? // QR window counter at submission time
+  pinCounter         Int? // PIN window counter at submission time
+  submittedNonce     BigInt? // BLE nonce submitted by client
+  verificationStatus String            @default("pending") // pending | verified | rejected | legacy_unverifiable
+  rejectionReason    String? // populated when verificationStatus = "rejected"
+  createdAt          DateTime          @default(now())
+  delegation         Delegation?       @relation(fields: [delegationId], references: [id])
+  conductedSession   ConductedSession? @relation(fields: [conductedSessionId], references: [id])
+
+  @@unique([studentId, unitCode, lectureRoom, sessionStart])
+  @@index([studentId])
+  @@index([unitCode])
+  @@index([institutionId])
+  @@index([delegationId])
+  @@index([markedByLecturerId])
+  @@index([unitCode, sessionStart])
+  @@index([studentId, unitCode])
+  @@index([conductedSessionId])
+  @@map("OfflineAttendanceRecord")
+}
+
+// One row per group per GD delegation event
+model Delegation {
+  id                String                    @id @default(uuid())
+  timetableEntryId  String
+  institutionId     String? // denormalised for FCM payload / GET response
+  unitCode          String
+  unitId            Int // numeric BLE unit id
+  roomCode          String
+  roomId            Int // numeric BLE room id
+  groupId           String // FK → Group.id
+  groupNumber       Int
+  groupName         String?
+  leaderStudentId   String? // nullable — FK → Student.id
+  validFrom         BigInt // Unix ms
+  validUntil        BigInt // Unix ms
+  sessionToken      String? // set on /start
+  used              Boolean                   @default(false)
+  startedAt         DateTime?
+  endedAt           DateTime?
+  createdBy         String // lecturer id
+  createdAt         DateTime                  @default(now())
+  attendanceRecords OfflineAttendanceRecord[]
+
+  @@index([leaderStudentId])
+  @@index([timetableEntryId])
+  @@index([unitCode])
+  @@index([timetableEntryId, used])
+  @@map("Delegation")
+}
+
+model TimetableVersion {
+  id        String   @id @default(uuid())
+  courseId  String   @unique
+  version   Int
+  updatedAt DateTime @default(now())
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@map("TimetableVersion")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  userType  UserType
+  type      String?
+  title     String
+  message   String
+  data      Json?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([userId, read])
+  @@map("Notification")
+}
+
+model UserNotification {
+  id          String    @id @default(uuid())
+  userId      String
+  type        String
+  title       String
+  body        String?
+  data        Json?
+  createdAt   DateTime  @default(now())
+  dismissedAt DateTime?
+  dedupeKey   String?
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, createdAt])
+  @@index([userId, dismissedAt])
+  @@map("user_notifications")
+}
+
+model LecturerNotification {
+  id           String    @id @default(uuid())
+  lecturerId   String
+  type         String
+  priority     String    @default("normal")
+  title        String
+  message      String
+  recipients   String[]
+  category     String?
+  severity     String?
+  sentBy       String?
+  sentCount    Int       @default(0)
+  readCount    Int       @default(0)
+  clickedCount Int       @default(0)
+  status       String    @default("sent")
+  sentAt       DateTime?
+  scheduledFor DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([lecturerId])
+  @@index([lecturerId, status])
+  @@map("LecturerNotification")
+}
+
+model AdminNotification {
+  id             String             @id @default(uuid())
+  type           String
+  title          String
+  body           String
+  priority       String             @default("normal")
+  targetRoles    String[]           @default([])
+  targetIds      String[]           @default([])
+  attachmentUrl  String?
+  actionRequired Boolean            @default(false)
+  createdAt      DateTime           @default(now())
+  reads          NotificationRead[]
+
+  @@index([createdAt])
+  @@map("AdminNotification")
+}
+
+model NotificationRead {
+  notificationId String
+  lecturerId     String
+  readAt         DateTime          @default(now())
+  notification   AdminNotification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@id([notificationId, lecturerId])
+  @@index([lecturerId])
+  @@map("NotificationRead")
+}
+
+// UnitsByCourseYearSemester and UnitsByYearSemester removed —
+// replaced by UnitOffering model which is the normalized source of truth.
+
+model GroupSubmission {
+  id        String                @id @default(uuid())
+  groupName String
+  members   String[]
+  status    GroupSubmissionStatus @default(active)
+  createdAt DateTime              @default(now())
+
+  @@map("GroupSubmission")
+}
+
+// Make-up / one-off sessions created by lecturers for a specific calendar date.
+model ExtraSession {
+  id         String    @id @default(uuid())
+  unitCode   String
+  lecturerId String
+  date       DateTime  @db.Date
+  startTime  String // "HH:MM" 24-hour
+  endTime    String // "HH:MM" 24-hour
+  roomCode   String?
+  roomId     String?
+  lessonType String    @default("LEC")
+  createdAt  DateTime  @default(now())
+  deletedAt  DateTime? // soft-delete; NULL = active
+
+  lecturer Lecturer @relation(fields: [lecturerId], references: [id], onDelete: Cascade)
+  room     Room?    @relation("ExtraSessionRoom", fields: [roomId], references: [id])
+
+  @@index([unitCode])
+  @@index([lecturerId])
+  @@index([unitCode, date])
+  @@index([deletedAt])
+  @@map("extra_sessions")
+}
+
+// Unit in a specific course/year/semester context — the primary scheduling unit.
+// Avoids traversing Course → YearBlock → Semester → Unit joins on every timetable query.
+model UnitOffering {
+  id        String   @id @default(uuid())
+  courseId  String
+  year      Int
+  semester  Int
+  unitId    String
+  createdAt DateTime @default(now())
+
+  course      Course                   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  unit        Unit                     @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  assignments LecturerUnitAssignment[]
+  timetables  Timetable[]
+
+  @@unique([courseId, year, semester, unitId])
+  @@index([courseId, year, semester])
+  @@index([unitId])
+  @@map("UnitOffering")
+}
+
+// Lecturer assigned to teach a unit offering — replaces the implicit timetable lookup.
+model LecturerUnitAssignment {
+  id             String   @id @default(uuid())
+  lecturerId     String
+  unitOfferingId String
+  createdAt      DateTime @default(now())
+
+  lecturer     Lecturer     @relation(fields: [lecturerId], references: [id], onDelete: Cascade)
+  unitOffering UnitOffering @relation(fields: [unitOfferingId], references: [id], onDelete: Cascade)
+
+  @@unique([lecturerId, unitOfferingId])
+  @@index([lecturerId])
+  @@index([unitOfferingId])
+  @@map("LecturerUnitAssignment")
+}
+
+// The single source of truth for a physical class session.
+// One row = one room at one time. Multiple Timetable entries may point to the
+// same SharedSession (isMerged = true) for cross-department joint classes.
+// Replaces: MergedSession, mergeGroupId, roomId/day/time on Timetable.
+model SharedSession {
+  id            String      @id @default(uuid())
+  institutionId String // denormalised for fast institution-scoped queries
+  campusId      String
+  roomId        String
+  lecturerId    String? // primary lecturer for this session (optional, for convenience)
+  day           DayOfWeek
+  startMinute   Int // minutes from midnight (e.g. 480 = 08:00)
+  endMinute     Int // minutes from midnight (e.g. 600 = 10:00)
+  sessionType   SessionType @default(LEC)
+  isMerged      Boolean     @default(false) // true when 2+ timetable entries share this session
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  room       Room        @relation(fields: [roomId], references: [id])
+  campus     Campus      @relation(fields: [campusId], references: [id])
+  timetables Timetable[]
+
+  @@index([campusId])
+  @@index([roomId])
+  @@index([lecturerId])
+  @@index([day, startMinute, endMinute])
+  @@index([lecturerId, day, startMinute, endMinute])
+  @@index([roomId, day, startMinute, endMinute])
+  @@map("SharedSession")
+}
+
+// MergedSession removed — merging is now handled by SharedSession.isMerged = true
+// and multiple Timetable entries sharing the same sharedSessionId.
+
+// Stores the mobile app's locally-selected enrollment (unit codes + names + year/semester).
+// One row per student — upserted on every sync.
+model StudentEnrollmentSnapshot {
+  id           String   @id @default(uuid())
+  studentId    String   @unique
+  unitCodes    String[]
+  unitNamesMap Json     @default("{}")
+  year         String
+  semester     String
+  updatedAt    DateTime @updatedAt
+
+  @@map("StudentEnrollmentSnapshot")
+}
+
+enum DayOfWeek {
+  MON
+  TUE
+  WED
+  THU
+  FRI
+  SAT
+  SUN
+}
+
+enum TimetableStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+  CANCELLED
+  ONLINE
+  RESCHEDULED
+}
+
+enum SessionType {
+  LEC
+  GRD
+  RAT
+  CAT
+  LAB
+  SEM
+  WRK
+  TUT
+  PRE
+}
+
+enum AdminRole {
+  super_admin
+  system_admin
+  academic_registrar
+  facilities_manager
+  department_admin
+}
+
+enum UserType {
+  student
+  lecturer
+  admin
+}
+
+enum RoomStatus {
+  free
+  reserved
+  occupied
+  unavailable
+}
+
+enum RoomType {
+  CLASSROOM
+  LAB
+  LECTURE_HALL
+  EXAM_ROOM
+  SEMINAR_ROOM
+  OFFICE
+}
+
+// BookingStatus removed — Booking model replaced by RoomReservation.
+
+enum BookingHoldStatus {
+  active
+  expired
+  confirmed
+  cancelled
+}
+
+// One row per invalidated JWT (jti). TTL = token's original expiry.
+// Checked during token verification to block deleted-account tokens.
+model TokenBlocklist {
+  id        String   @id @default(uuid())
+  jti       String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@map("TokenBlocklist")
+}
+
+enum SubmissionStatus {
+  pending
+  submitted
+  graded
+  late
+}
+
+enum GroupSubmissionStatus {
+  active
+  completed
+  cancelled
+}
+
+model FacilitiesManager {
+  id            String      @id @default(uuid())
+  email         String      @unique
+  passwordHash  String
+  fullName      String
+  institutionId String      @unique
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  institution   Institution @relation(fields: [institutionId], references: [id])
+
+  @@index([institutionId])
+  @@map("FacilitiesManager")
+}
+
+model InstitutionMappingSet {
+  id            String      @id @default(uuid())
+  institutionId String
+  version       String
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  mappingKey    String
+  metadata      Json?       @default("{}")
+  institution   Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+
+  @@unique([institutionId, version, mappingKey])
+  @@index([institutionId])
+  @@index([createdAt])
+  @@map("InstitutionMappingSet")
+}
+
+model StudentPoints {
+  id            String   @id @default(uuid())
+  studentId     String   @unique
+  courseId      String
+  institutionId String
+  totalPoints   Int      @default(0)
+  currentStreak Int      @default(0)
+  longestStreak Int      @default(0)
+  attendancePct Float    @default(0)
+  statsJson     Json?
+  breakdownJson Json?
+  computedAt    DateTime @default(now())
+  student       Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([courseId, totalPoints(sort: Desc)])
+  @@index([institutionId, totalPoints(sort: Desc)])
+  @@map("StudentPoints")
+}
+
+// Lecturer-generated academic reports (attendance, performance, etc.)
+model LecturerReport {
+  id            String    @id @default(uuid())
+  lecturerId    String
+  period        String // "weekly" | "monthly" | "semester"
+  types         String[] // ["attendance", "performance", "assignments", ...]
+  format        String // "pdf" | "csv" | "excel"
+  unitCodes     String[]  @default([])
+  startDate     DateTime?
+  endDate       DateTime?
+  fileUrl       String? // public URL (Vercel Blob or similar)
+  filePath      String? // legacy: server-side path
+  fileSizeBytes Int       @default(0)
+  generatedAt   DateTime  @default(now())
+
+  @@index([lecturerId])
+  @@index([lecturerId, generatedAt])
+  @@map("LecturerReport")
+}

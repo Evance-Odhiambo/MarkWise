@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- ── Privacy usage descriptions (required for App Store review) ── -->
+	<key>NSCameraUsageDescription</key>
+	<string>MarkWise uses the camera to scan QR codes for attendance and to participate in live video sessions.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>MarkWise uses the microphone for live video sessions with your lecturer.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>MarkWise uses Bluetooth to verify your proximity during offline attendance sessions.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>MarkWise uses Bluetooth to verify your proximity during offline attendance sessions.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>MarkWise may use your location to assist Bluetooth-based attendance verification.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>MarkWise uses motion data to verify device movement patterns during attendance.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>MarkWise needs access to your photo library to attach files to assignment submissions.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>MarkWise may save downloaded course materials to your photo library.</string>
+
+	<!-- ── Display / bundle ── -->
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>MarkWise</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+
+	<!-- ── App Transport Security ── -->
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<!-- NSAllowsArbitraryLoadsInWebContent lets WKWebView load HTTP pages (e.g. MiroTalk on LAN)
+		     without enabling insecure loads for the rest of the app's network calls. -->
+		<key>NSAllowsArbitraryLoads</key>
+		<false/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+	</dict>
+
+	<!-- ── UI ── -->
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+	</array>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+	</array>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<false/>
+
+	<!-- ── Background execution ──
+	     bluetooth-central:    BLE scanning continues when app is backgrounded (student side).
+	     bluetooth-peripheral: BLE advertising continues when app is backgrounded (lecturer side).
+	     processing:           Allows BGProcessingTask for deferred sync work.
+	     fetch:                Allows BGAppRefreshTask for periodic data refresh. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
+		<string>bluetooth-peripheral</string>
+		<string>processing</string>
+		<string>fetch</string>
+	</array>
+
+	<!-- ── Deep links: markwise:// scheme ── -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.markwise.deeplink</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>markwise</string>
+			</array>
+		</dict>
+	</array>
+
+	<!-- ── File sharing (required for react-native-share to share local files) ──
+	     UIFileSharingEnabled: exposes the app's Documents directory via iTunes/Finder
+	     and allows other apps to receive files via UIActivityViewController.
+	     LSSupportsOpeningDocumentsInPlace: lets PDF viewers, Files app, etc. open
+	     documents directly from the app container without copying first.
+	     Both are required for "Open in…" / AirDrop / email attachment to work with
+	     locally generated PDF and CSV reports. -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+
+	<!-- ── Document type declarations ──
+	     Tells iOS which file types this app can export/share so that the share
+	     sheet populates with appropriate receiving apps (Mail, Files, Drive, etc.) -->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>PDF Document</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.adobe.pdf</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>CSV Spreadsheet</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.comma-separated-values-text</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider paths for react-native-share and react-native-html-to-pdf.
+  Covers every directory these libraries write to on Android so that
+  file:// URIs can be converted to shareable content:// URIs without
+  triggering FileUriExposedException (Android 7+).
+-->
+<paths>
+  <!-- App internal files directory (RNFS.DocumentDirectoryPath) — where html-to-pdf writes PDFs -->
+  <files-path name="internal_files" path="." />
+  <!-- App internal cache directory (RNFS.CachesDirectoryPath / TemporaryDirectoryPath) -->
+  <cache-path name="internal_cache" path="." />
+  <!-- App external files directory (RNFS.ExternalDirectoryPath) -->
+  <external-files-path name="external_files" path="." />
+  <!-- App external cache directory -->
+  <external-cache-path name="external_cache" path="." />
+  <!-- Public external storage (the Download/ folder react-native-share's built-in xml also covered) -->
+  <external-path name="external_download" path="Download/" />
+  <external-path name="external_root" path="." />
+</paths>
