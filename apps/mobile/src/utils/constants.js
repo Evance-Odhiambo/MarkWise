@@ -78,7 +78,7 @@ export const ONLINE_SESSION_DURATION_MS = 10 * 60 * 1000; // 10 minutes
 // For Android emulator use: 'http://10.0.2.2:3000'
 // For iOS simulator use: 'http://localhost:3000'
 // To support per-environment overrides, install react-native-config and configure .env files.
-export const API_BASE_URL = 'http://192.168.0.100:3000';
+export const API_BASE_URL = 'https://markwise-gilt.vercel.app';
 
 /**
  * Canonical unit code normalizer used across the entire app.
