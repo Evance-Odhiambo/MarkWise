@@ -2,23 +2,31 @@
   "name": "markwise-monorepo",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "apps/web"
+  ],
   "scripts": {
-    "dev": "npm --prefix apps/web run dev",
-    "dev:web": "npm --prefix apps/web run dev",
-    "dev:mobile": "npm --prefix apps/mobile run start",
-    "build": "npm --prefix apps/web run build",
-    "build:web": "npm --prefix apps/web run build",
-    "start": "npm --prefix apps/web run start",
-    "start:web": "npm --prefix apps/web run start",
-    "lint": "npm --prefix apps/web run lint",
-    "test": "npm --prefix apps/web run test",
+    "dev": "turbo run dev",
+    "dev:web": "turbo run dev --filter=@markwise/web",
+    "dev:mobile": "npm run start --workspace=apps/mobile",
+    "build": "turbo run build",
+    "build:web": "turbo run build --filter=@markwise/web",
+    "start": "turbo run start",
+    "start:web": "turbo run start --filter=@markwise/web",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "clean": "turbo run clean",
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
     "docker:logs": "docker-compose logs -f",
     "docker:rebuild": "docker-compose up -d --build",
-    "prisma:generate": "npm --prefix apps/web run prisma:generate",
-    "prisma:push": "npm --prefix apps/web run prisma:push",
-    "prisma:migrate": "npm --prefix apps/web run prisma:migrate"
+    "prisma:generate": "turbo run prisma:generate",
+    "prisma:push": "turbo run prisma:push",
+    "prisma:migrate": "turbo run prisma:migrate"
+  },
+  "devDependencies": {
+    "effect": "^3.22.0",
+    "turbo": "^2.3.4"
   },
   "packageManager": "npm@10.9.2",
   "engines": {
