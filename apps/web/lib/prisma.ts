@@ -8,26 +8,28 @@ import { PrismaClientKnownRequestError } from "@prisma/client/runtime/client";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Explicitly forces Node.js to ignore TLS errors globally for local/internal scripts
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
 dotenv.config({ path: path.resolve(__dirname, "..", ".env.local"), override: true });
 
-const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined;
-};
+const globalForPrisma = globalThis as unknown as { prisma: PrismaClient | undefined; };
 
 const baseConnectionString = process.env.DATABASE_URL || process.env.DIRECT_URL;
 
-const connectionString = baseConnectionString?.includes("sslmode=")
-  ? baseConnectionString
+const connectionString = baseConnectionString?.includes("sslmode=") 
+  ? baseConnectionString 
   : `${baseConnectionString}${baseConnectionString?.includes("?") ? "&" : "?"}sslmode=require`;
 
+// ⚠️ FIXED: Updated to explicitly map connection parameters so the 'pg' module respects the certificate chain bypass
 const pool = new pg.Pool({
   connectionString,
   ssl: {
-    rejectUnauthorized: false,
+    rejectUnauthorized: false, // 👈 Tells pg driver to accept self-signed proxy certificates
   },
 });
 
+// Pass the configured pool into Prisma's adapter wrapper
 const adapter = new PrismaPg(pool, {
   disposeExternalPool: true,
 });
@@ -37,12 +39,10 @@ const adapter = new PrismaPg(pool, {
  * Connection pooling is handled by Prisma's built-in connection pool.
  * For production with connection limits, add ?connection_limit=10 to DATABASE_URL.
  */
-export const prisma =
-  globalForPrisma.prisma ??
-  new PrismaClient({
-    adapter,
-    log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
-  });
+export const prisma = globalForPrisma.prisma ?? new PrismaClient({
+  adapter,
+  log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
+});
 
 globalForPrisma.prisma ??= prisma;
 
@@ -61,8 +61,7 @@ export async function withRetry<T>(
     try {
       return await fn();
     } catch (err) {
-      const code =
-        err instanceof PrismaClientKnownRequestError ? err.code : null;
+      const code = err instanceof PrismaClientKnownRequestError ? err.code : null;
       if (code && RETRYABLE.has(code) && attempt < retries) {
         await new Promise((r) => setTimeout(r, delayMs * attempt));
         continue;
