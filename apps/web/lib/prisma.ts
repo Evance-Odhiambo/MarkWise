@@ -1,7 +1,14 @@
-import "dotenv/config";
-import { Pool } from "pg"; // 👈 1. Add this import
+import * as dotenv from "dotenv";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
+import { Pool } from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, Prisma } from "@prisma/client";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+dotenv.config({ path: path.resolve(__dirname, "..", ".env") });
+dotenv.config({ path: path.resolve(__dirname, "..", ".env.local"), override: true });
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
