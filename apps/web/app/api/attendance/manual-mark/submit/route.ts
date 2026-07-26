@@ -19,6 +19,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyLecturerAccessToken } from "@/lib/lecturerAuthJwt";
+import { normalizeUnitCode } from "@/lib/unitCode";
 
 export const runtime = "nodejs";
 
@@ -36,6 +37,21 @@ const VALID_LESSON_TYPES = new Set(["LEC", "GD", "RAT", "CAT", "LAB", "SEM", "WR
 
 function normaliseCode(code: string): string {
   return code.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function normalizeUnitCodeForLookup(raw: string): string {
+  return normalizeUnitCode(raw).replace(/\s+/g, "");
+}
+
+async function resolveUnitId(unitCode: string) {
+  const normalized = unitCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const rows = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT id
+    FROM "Unit"
+    WHERE UPPER(REPLACE(code, ' ', '')) = ${normalized}
+    LIMIT 1
+  `;
+  return rows[0]?.id ?? null;
 }
 
 export async function POST(req: NextRequest) {
@@ -132,26 +148,36 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: corsHeaders });
     }
 
-    // Verify lecturer is assigned to teach this unit (at least one timetable entry)
-    const timetableEntry = await prisma.timetable.findFirst({
-      where: {
-        lecturerId,
-        unitOffering: {
-          unit: {
-            OR: [
-              { code: normUnit },
-              { code: unitCodeRaw.trim() },
-            ],
-          },
-        },
-      },
-      select: { id: true },
-    });
-    if (!timetableEntry) {
+    // Resolve the requested unit using space-insensitive matching.
+    const unitId = await resolveUnitId(unitCodeRaw);
+    if (!unitId) {
       return NextResponse.json(
         { message: "You are not assigned to teach this unit" },
         { status: 403, headers: corsHeaders },
       );
+    }
+
+    const assigned = await prisma.lecturerUnitAssignment.findFirst({
+      where: {
+        lecturerId,
+        unitOffering: { unitId },
+      },
+      select: { id: true },
+    });
+    if (!assigned) {
+      const timetableEntry = await prisma.timetable.findFirst({
+        where: {
+          lecturerId,
+          unitOffering: { unitId },
+        },
+        select: { id: true },
+      });
+      if (!timetableEntry) {
+        return NextResponse.json(
+          { message: "You are not assigned to teach this unit" },
+          { status: 403, headers: corsHeaders },
+        );
+      }
     }
 
     // Verify student exists and is in the same institution as the lecturer

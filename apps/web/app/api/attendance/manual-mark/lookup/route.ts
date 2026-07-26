@@ -27,6 +27,17 @@ function normaliseCode(code: string): string {
   return code.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
+async function resolveUnitId(unitCode: string) {
+  const normalized = unitCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const rows = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT id
+    FROM "Unit"
+    WHERE UPPER(REPLACE(code, ' ', '')) = ${normalized}
+    LIMIT 1
+  `;
+  return rows[0]?.id ?? null;
+}
+
 export async function GET(req: NextRequest) {
   const token = (req.headers.get("authorization") ?? "")
     .replace(/^Bearer\s+/i, "")
@@ -55,6 +66,12 @@ export async function GET(req: NextRequest) {
   const admissionNumber = admissionNumberRaw.trim().toUpperCase();
   const normUnit = normaliseCode(unitCodeRaw);
 
+  // Resolve unit and verify lecturer assignment for this unit.
+  const unitId = await resolveUnitId(unitCodeRaw);
+  if (!unitId) {
+    return NextResponse.json({ message: "Unit not found" }, { status: 404, headers: corsHeaders });
+  }
+
   // Derive institutionId from lecturer for scoped student lookup
   const lecturer = await prisma.lecturer.findUnique({
     where: { id: lecturerId },
@@ -62,6 +79,20 @@ export async function GET(req: NextRequest) {
   });
   if (!lecturer) {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: corsHeaders });
+  }
+
+  const assignedUnit = await prisma.lecturerUnitAssignment.findFirst({
+    where: { lecturerId, unitOffering: { unitId } },
+    select: { id: true },
+  });
+  if (!assignedUnit) {
+    const timetableEntry = await prisma.timetable.findFirst({
+      where: { lecturerId, unitOffering: { unitId } },
+      select: { id: true },
+    });
+    if (!timetableEntry) {
+      return NextResponse.json({ message: "Forbidden" }, { status: 403, headers: corsHeaders });
+    }
   }
 
   try {

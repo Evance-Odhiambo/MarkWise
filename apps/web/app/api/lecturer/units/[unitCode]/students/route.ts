@@ -84,16 +84,23 @@ export async function GET(
     }
     const unitId = unitRows[0].id;
 
-    // ── Authorization: lecturer must be timetable-assigned to this unit ───
-    const timetableEntry = await prisma.timetable.findFirst({
+    // ── Authorization: lecturer must be assigned to this unit either via
+    //    explicit LecturerUnitAssignment or via a Timetable entry.
+    const assignedUnit = await prisma.lecturerUnitAssignment.findFirst({
       where: { lecturerId, unitOffering: { unitId } },
       select: { id: true },
     });
-    if (!timetableEntry) {
-      return NextResponse.json(
-        { error: "Forbidden" },
-        { status: 403, headers: corsHeaders },
-      );
+    if (!assignedUnit) {
+      const timetableEntry = await prisma.timetable.findFirst({
+        where: { lecturerId, unitOffering: { unitId } },
+        select: { id: true },
+      });
+      if (!timetableEntry) {
+        return NextResponse.json(
+          { error: "Forbidden" },
+          { status: 403, headers: corsHeaders },
+        );
+      }
     }
 
     // ── Resolve institutionId from DB — never from caller input ──────────
