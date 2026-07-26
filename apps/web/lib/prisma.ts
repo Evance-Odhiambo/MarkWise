@@ -1,7 +1,6 @@
 import * as dotenv from "dotenv";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Pool } from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, Prisma } from "@prisma/client";
 
@@ -20,16 +19,12 @@ const connectionString = baseConnectionString?.includes("sslmode=")
   ? baseConnectionString
   : `${baseConnectionString}${baseConnectionString?.includes("?") ? "&" : "?"}sslmode=require`;
 
-// 👈 2. Create a pg Pool and explicitly bypass unauthorized TLS certificates
-const pool = new Pool({
+const adapter = new PrismaPg({
   connectionString,
   ssl: {
     rejectUnauthorized: false,
   },
 });
-
-// 👈 3. Pass the pool instance into the PrismaPg adapter
-const adapter = new PrismaPg(pool);
 
 /**
  * Standard Prisma client for PostgreSQL.
