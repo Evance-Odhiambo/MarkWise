@@ -1,6 +1,7 @@
 import * as dotenv from "dotenv";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import pg from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/client";
@@ -20,11 +21,15 @@ const connectionString = baseConnectionString?.includes("sslmode=")
   ? baseConnectionString
   : `${baseConnectionString}${baseConnectionString?.includes("?") ? "&" : "?"}sslmode=require`;
 
-const adapter = new PrismaPg({
+const pool = new pg.Pool({
   connectionString,
   ssl: {
     rejectUnauthorized: false,
   },
+});
+
+const adapter = new PrismaPg(pool, {
+  disposeExternalPool: true,
 });
 
 /**
