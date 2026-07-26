@@ -2,7 +2,8 @@ import * as dotenv from "dotenv";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient, Prisma } from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
+import { PrismaClientKnownRequestError } from "@prisma/client/runtime/client";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -56,7 +57,7 @@ export async function withRetry<T>(
       return await fn();
     } catch (err) {
       const code =
-        err instanceof Prisma.PrismaClientKnownRequestError ? err.code : null;
+        err instanceof PrismaClientKnownRequestError ? err.code : null;
       if (code && RETRYABLE.has(code) && attempt < retries) {
         await new Promise((r) => setTimeout(r, delayMs * attempt));
         continue;
