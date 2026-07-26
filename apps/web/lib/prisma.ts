@@ -6,8 +6,15 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
+// Use the Supabase pooler URL for normal app runtime.
+// Only fallback to DIRECT_URL if DATABASE_URL is missing.
+const baseConnectionString = process.env.DATABASE_URL || process.env.DIRECT_URL;
+const connectionString = baseConnectionString?.includes("sslmode=")
+  ? baseConnectionString
+  : `${baseConnectionString}${baseConnectionString?.includes("?") ? "&" : "?"}sslmode=require`;
+
 const adapter = new PrismaPg({
-  connectionString: process.env.DATABASE_URL,
+  connectionString,
 });
 
 /**

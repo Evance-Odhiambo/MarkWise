@@ -1,4 +1,11 @@
 // prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
 
 model Group {
   id                  String        @id @default(uuid())
@@ -92,10 +99,6 @@ model Submission {
   @@map("Submission")
 }
 
-generator client {
-  provider = "prisma-client-js"
-}
-
 model Material {
   id          String         @id @default(uuid())
   unitId      String
@@ -131,10 +134,6 @@ model MaterialView {
   @@index([materialId])
   @@index([studentId])
   @@map("MaterialView")
-}
-
-datasource db {
-  provider = "postgresql"
 }
 
 model Institution {
@@ -278,8 +277,6 @@ model Semester {
   @@index([yearId])
   @@map("Semester")
 }
-
-
 
 model Unit {
   id              String           @id @default(uuid())
