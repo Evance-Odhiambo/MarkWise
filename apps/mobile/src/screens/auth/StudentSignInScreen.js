@@ -152,6 +152,15 @@ export default function StudentSignInScreen({ navigation }) {
           bounces={false}
           keyboardShouldPersistTaps="handled"
         >
+          <TouchableOpacity onPress={() => {
+            if (navigation?.canGoBack?.()) {
+              navigation.goBack();
+            } else {
+              navigation.replace('RoleSelection');
+            }
+          }} style={styles.backButton}>
+            <Icon name="arrow-left" size={22} color={C.text} />
+          </TouchableOpacity>
 
           {/* Hero */}
           <View style={styles.hero}>
@@ -321,6 +330,11 @@ const makeStyles = (C) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   keyboardView: { flex: 1 },
   scrollContent: { flexGrow: 1, paddingBottom: 36 },
+  backButton: {
+    paddingHorizontal: 24,
+    paddingTop: 12,
+    paddingBottom: 4,
+  },
 
   hero: { paddingTop: 16, paddingHorizontal: 24, paddingBottom: 28 },
   brandRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 22 },

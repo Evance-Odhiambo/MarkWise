@@ -26,41 +26,61 @@ import AppHeader from "./components/AppHeader";
 import AppFooter from "./components/AppFooter";
 
 // ──────────────────────────────────────────────
-// ADMIN ROLES CONFIGURATION
+// WEB LANDING PAGE DATA
 // ──────────────────────────────────────────────
-// ✅ MOVED OUTSIDE COMPONENT - Consistent on server & client
+// Audience-first: students/lecturers get app CTA, admins get onboarding CTA.
+
+const APP_USERS = [
+  {
+    title: "Student",
+    description: "Mark attendance, track progress, join groups, and access materials from your phone.",
+    href: "#",
+    color: "from-emerald-500 to-green-500",
+    badge: "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/30",
+    icon: <Users className="h-6 w-6" />,
+  },
+  {
+    title: "Lecturer",
+    description: "Launch attendance sessions, manage classes, share materials, and review reports.",
+    href: "#",
+    color: "from-purple-500 to-violet-500",
+    badge: "bg-purple-50 dark:bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-500/30",
+    icon: <GraduationCap className="h-6 w-6" />,
+  },
+];
+
 const ADMIN_ROLES_CONFIG = [
   {
-    icon: <Building2 className="h-6 w-6" />,
     title: "System Administrator",
     description: "Onboards and manages an entire institution — departments, staff, and settings.",
     href: "/admin/system-admin/register",
     color: "from-indigo-500 to-blue-500",
     badge: "bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-500/30",
+    icon: <Building2 className="h-6 w-6" />,
   },
   {
-    icon: <GraduationCap className="h-6 w-6" />,
     title: "Academic Registrar",
     description: "Manages students, lecturers, curriculum, timetable, enrolments, and academic analytics.",
     href: "/admin/academic-registrar/register",
     color: "from-purple-500 to-violet-500",
     badge: "bg-purple-50 dark:bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-500/30",
+    icon: <GraduationCap className="h-6 w-6" />,
   },
   {
-    icon: <DoorOpen className="h-6 w-6" />,
     title: "Facilities Manager",
     description: "Controls room bookings, reservations, space availability, and physical resource allocation.",
     href: "/admin/facilities-manager/register",
     color: "from-orange-500 to-red-400",
     badge: "bg-orange-50 dark:bg-orange-500/10 text-orange-700 dark:text-orange-300 border-orange-200 dark:border-orange-500/30",
+    icon: <DoorOpen className="h-6 w-6" />,
   },
   {
-    icon: <Users2 className="h-6 w-6" />,
     title: "Department Admin",
     description: "Manages timetable, curriculum, students, lecturers, and courses within a specific department.",
     href: "/admin/department-admin/register",
     color: "from-teal-500 to-emerald-400",
     badge: "bg-teal-50 dark:bg-teal-500/10 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-500/30",
+    icon: <Users2 className="h-6 w-6" />,
   },
 ];
 
@@ -248,15 +268,14 @@ function LandingPageContent() {
             </motion.div>
 
             <motion.h1 variants={fadeInUp} className="text-3xl sm:text-4xl lg:text-5xl xl:text-6xl font-bold tracking-tight">
-              Replace Fragmented
+              Verified Attendance for
               <span className="block mt-2 bg-gradient-to-r from-indigo-600 via-purple-600 to-cyan-600 bg-clip-text text-transparent">
-                Campus Operations
+                Every Campus Role
               </span>
             </motion.h1>
 
             <motion.p variants={fadeInUp} className="text-base sm:text-lg text-slate-600 dark:text-slate-300 max-w-xl">
-              MarkWise unifies attendance verification, room coordination, assignment workflows, routine updates,student group management, data insights,
-              and learning analytics for institutions running physical, online, and hybrid learning.
+              MarkWise gives students, lecturers, and administrators one place for attendance, rooms, assignments, and academic coordination.
             </motion.p>          
 
             <motion.div variants={fadeInUp} className="flex items-center gap-6 pt-4">
@@ -442,6 +461,63 @@ function LandingPageContent() {
         </motion.div>
       </section>
 
+      {/* App Users Section */}
+      <section id="app-users" ref={rolesRef} className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-16 lg:py-24">
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          animate={rolesInView ? { opacity: 1, y: 0 } : { opacity: 0, y: 30 }}
+          transition={{ duration: 0.6 }}
+          className="text-center space-y-4 mb-16"
+        >
+          <span className="inline-block px-4 py-2 rounded-full bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/30 text-indigo-700 dark:text-indigo-300 text-sm font-medium">
+            Who Uses MarkWise
+          </span>
+          <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight">
+            Built for the people who
+            <span className="block mt-2 bg-gradient-to-r from-indigo-600 to-cyan-600 bg-clip-text text-transparent">
+              run the classroom
+            </span>
+          </h2>
+          <p className="max-w-2xl mx-auto text-lg text-slate-600 dark:text-slate-300">
+            Whether you attend, teach, or administer — MarkWise gives you one consistent workflow.
+          </p>
+        </motion.div>
+
+        <motion.div
+          variants={staggerContainer}
+          initial="hidden"
+          animate={rolesInView ? "visible" : "hidden"}
+          className="grid grid-cols-1 sm:grid-cols-2 gap-6 lg:gap-8 max-w-4xl mx-auto"
+        >
+          {APP_USERS.map((role) => (
+            <motion.div
+              key={role.title}
+              variants={fadeInUp}
+              whileHover={{ y: -6, transition: { duration: 0.3 } }}
+              className="group relative"
+            >
+              <div className="relative p-7 rounded-2xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-indigo-300 dark:hover:border-indigo-500/40 transition-all duration-300 h-full flex flex-col">
+                <div className={`h-12 w-12 rounded-xl bg-gradient-to-r ${role.color} flex items-center justify-center mb-5 text-white shadow-lg group-hover:scale-110 transition-transform duration-300`}>
+                  {role.icon}
+                </div>
+                <span className={`self-start mb-3 px-2.5 py-0.5 rounded-full text-[11px] font-semibold border ${role.badge}`}>
+                  {role.title}
+                </span>
+                <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed flex-1">{role.description}</p>
+                <Link
+                  key={pathname}
+                  href={role.href}
+                  className="mt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-indigo-600 dark:text-indigo-400 hover:gap-2.5 transition-all"
+                >
+                  Get started
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </div>
+            </motion.div>
+          ))}
+        </motion.div>
+      </section>
+
       {/* How It Works Section */}
       <section id="how-it-works" ref={howItWorksRef} className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-16 lg:py-24">
         <motion.div
@@ -589,13 +665,13 @@ function LandingPageContent() {
             Admin Roles
           </span>
           <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight">
-            Four Roles,
+            One Coordinated
             <span className="block mt-2 bg-gradient-to-r from-indigo-600 to-cyan-600 bg-clip-text text-transparent">
-              One Coordinated Institution
+              Institution
             </span>
           </h2>
           <p className="max-w-2xl mx-auto text-lg text-slate-600 dark:text-slate-300">
-            Each role has a focused scope — from institution-wide oversight down to department-level operations — so authority is clear and nothing falls through the gaps.
+            Institution, academic, facilities, and department leaders each get a focused scope — so authority is clear and nothing falls through the gaps.
           </p>
         </motion.div>
 
@@ -659,7 +735,7 @@ function LandingPageContent() {
               transition={{ duration: 0.6, delay: 0.2 }}
               className="text-2xl sm:text-3xl lg:text-4xl font-bold mb-6"
             >
-              Ready to Pilot MarkWise in Your Institution?
+              Ready to Use MarkWise?
             </motion.h2>
             
             <motion.p
@@ -668,22 +744,29 @@ function LandingPageContent() {
               transition={{ duration: 0.6, delay: 0.3 }}
               className="text-base sm:text-lg mb-10 max-w-2xl mx-auto opacity-90"
             >
-              Register as System Administrator to onboard your institution, then add your Academic Registrar,
-              Facilities Manager, and Department Administrators to activate the full platform.
+              Students and lecturers get started through the mobile app. Administrators register here to onboard their institution and activate staff roles.
             </motion.p>
             
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={ctaInView ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
               transition={{ duration: 0.6, delay: 0.4 }}
-              className="flex justify-center"
+              className="flex flex-col sm:flex-row items-center justify-center gap-4"
             >
               <Link
-                key={pathname} // ← Added key for consistency
+                key={pathname}
                 href="/admin/system-admin/register"
-                className="group px-10 py-4 bg-indigo-600 text-white rounded-2xl font-semibold text-lg hover:shadow-2xl transition-all duration-300 hover:scale-105 flex items-center justify-center gap-2"
+                className="group px-10 py-4 bg-white text-indigo-700 rounded-2xl font-semibold text-lg hover:shadow-2xl transition-all duration-300 hover:scale-105 flex items-center justify-center gap-2"
               >
-                Get Started — Register Your Institution
+                Register as Admin
+                <ArrowRight className="h-5 w-5 group-hover:translate-x-1 transition-transform" />
+              </Link>
+              <Link
+                key={pathname}
+                href="#"
+                className="group px-10 py-4 bg-indigo-500/20 text-white border border-white/30 rounded-2xl font-semibold text-lg hover:bg-indigo-500/30 transition-all duration-300 hover:scale-105 flex items-center justify-center gap-2"
+              >
+                Download the App
                 <ArrowRight className="h-5 w-5 group-hover:translate-x-1 transition-transform" />
               </Link>
             </motion.div>

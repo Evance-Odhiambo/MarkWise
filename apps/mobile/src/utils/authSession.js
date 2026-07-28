@@ -4,6 +4,7 @@
 // first read and then removed from AsyncStorage.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
+import { clearDeviceKey } from './studentDeviceKey';
 
 // Keychain service names — one per role so each has its own encrypted entry.
 const STUDENT_KEYCHAIN_SERVICE  = 'markwise.student.session.v2';
@@ -180,8 +181,21 @@ export const getStudentSession = async () => {
 
 export const clearStudentSession = async () => {
   await keychainDelete(STUDENT_KEYCHAIN_SERVICE);
-  // Also clear any residual legacy entry
   await AsyncStorage.removeItem(LEGACY_STUDENT_KEY).catch(() => {});
+
+  // Clear per-account device identifiers so the next login cannot inherit
+  // the previous student's attendance fingerprint or relay identity.
+  try {
+    await clearDeviceKey();
+  } catch (_) {}
+
+  // Use a dynamic import to avoid creating a static cycle with sqliteStorage,
+  // which imports getStudentSession from this module.
+  try {
+    const storage = await import('../storage/sqliteStorage');
+    await storage.clearAttendanceDeviceId?.();
+  } catch (_) {}
+
   emitAuthSessionChange({ role: 'student', action: 'cleared' });
 };
 

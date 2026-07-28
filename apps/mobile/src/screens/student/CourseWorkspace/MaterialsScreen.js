@@ -548,10 +548,15 @@ export default function MaterialsScreen({ route }) {
       return;
     }
 
-    // Resolve relative URLs against the API base
-    const resolvedUrl = material.fileUrl.startsWith('http')
-      ? material.fileUrl
-      : `${API_BASE_URL}${material.fileUrl.startsWith('/') ? '' : '/'}${material.fileUrl}`;
+    let resolvedUrl = material.fileUrl.trim();
+    if (!resolvedUrl) return;
+
+    if (!/^https?:\/\//i.test(resolvedUrl)) {
+      const base = API_BASE_URL.replace(/\/$/, '');
+      resolvedUrl = resolvedUrl.startsWith('/')
+        ? `${base}${resolvedUrl}`
+        : `${base}/${resolvedUrl}`;
+    }
 
     const rawUrl = resolvedUrl.split('?')[0];
     const ext = rawUrl.split('.').pop().toLowerCase() || 'bin';
@@ -561,23 +566,48 @@ export default function MaterialsScreen({ route }) {
     setDownloadStates(prev => ({ ...prev, [id]: { status: 'downloading', progress: 0, localPath: null } }));
     try {
       const session = await getStudentSession();
-      const headers = session?.token ? { Authorization: `Bearer ${session.token}` } : {};
+      const headers: Record<string, string> = {};
+      if (session?.token) {
+        headers.Authorization = `Bearer ${session.token}`;
+      }
 
-      await ReactNativeBlobUtil
+      const task = ReactNativeBlobUtil
         .config({ path: destPath, overwrite: true })
-        .fetch('GET', resolvedUrl, headers)
-        .progress({ interval: 150 }, (received, total) => {
-          if (total > 0) {
+        .fetch('GET', resolvedUrl, headers);
+
+      await new Promise((resolve, reject) => {
+        let settled = false;
+        task.progress({ interval: 150 }, (received, total) => {
+          if (settled || total <= 0) return;
+          setDownloadStates(prev => {
+            const prevEntry = prev[id] || {};
+            if (prevEntry.status !== 'downloading') {
+              settled = true;
+              return prev;
+            }
+            return {
+              ...prev,
+              [id]: {
+                ...prevEntry,
+                progress: Math.round((received / total) * 100),
+              },
+            };
+          });
+        });
+        task
+          .then(() => {
+            settled = true;
             setDownloadStates(prev => ({
               ...prev,
-              [id]: { ...prev[id], progress: Math.round((received / total) * 100) },
+              [id]: { status: 'downloaded', progress: 100, localPath: destPath },
             }));
-          }
-        });
-      setDownloadStates(prev => ({
-        ...prev,
-        [id]: { status: 'downloaded', progress: 100, localPath: destPath },
-      }));
+            resolve();
+          })
+          .catch(err => {
+            settled = true;
+            reject(err);
+          });
+      });
     } catch (err) {
       setDownloadStates(prev => ({ ...prev, [id]: { status: 'error', progress: 0, localPath: null } }));
       Alert.alert('Download failed', err.message || 'Please check your connection and try again.');

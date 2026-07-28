@@ -28,6 +28,28 @@ function detectMethod(rawPayload: string): string {
   return "qr";
 }
 
+// Extract numeric unit/room IDs from QR or BLE payloads for offline-first session lookup.
+function extractNumericIds(rawPayload: string): { unitId?: number; roomId?: number } {
+  if (!rawPayload) return {};
+  try {
+    if (rawPayload.startsWith("MWQR0x01:") || rawPayload.startsWith("MWQR2:")) {
+      const content = Buffer.from(rawPayload.split(":")[1]!, "base64").toString("utf8");
+      const parts = content.split("|");
+      if (parts.length >= 6 && parts[0] === "mwv1") {
+        return { unitId: parseInt(parts[1]!, 10), roomId: parseInt(parts[2]!, 10) };
+      }
+    }
+    if (rawPayload.startsWith("MWBLE:v1:")) {
+      const inner = rawPayload.slice(9);
+      const parts = inner.split(":");
+      if (parts.length === 4) {
+        return { unitId: parseInt(parts[2]!, 10), roomId: parseInt(parts[3]!, 10) };
+      }
+    }
+  } catch { /* ignore parse errors */ }
+  return {};
+}
+
 // POST /api/attendance/offline/submit
 export async function POST(req: NextRequest) {
   // ── Auth ────────────────────────────────────────────────────────────────
@@ -106,7 +128,7 @@ export async function POST(req: NextRequest) {
     }
 
     const SESSION_TOLERANCE_MS = 10_000; // ±10 s per spec
-    const session = await prisma.conductedSession.findFirst({
+    let session = await prisma.conductedSession.findFirst({
       where: {
         unitCode:     { in: [unitCode, unitCode.replace(/\s+/g, "")] },
         lectureRoom:  { in: Array.from(roomCandidates) },
@@ -123,6 +145,33 @@ export async function POST(req: NextRequest) {
       },
       orderBy: { sessionStart: "desc" },
     });
+
+    // Offline-first fallback: if room-code lookup failed, try matching by numeric
+    // BLE IDs extracted from the rawPayload. This allows attendance to work when
+    // the student device has no cached institution mappings.
+    if (!session && rawPayload) {
+      const { unitId, roomId } = extractNumericIds(rawPayload);
+      if (unitId != null || roomId != null) {
+        session = await prisma.conductedSession.findFirst({
+          where: {
+            unitCode:     { in: [unitCode, unitCode.replace(/\s+/g, "")] },
+            sessionStart: {
+              gte: new Date(normalisedStartMs - SESSION_TOLERANCE_MS),
+              lte: new Date(normalisedStartMs + SESSION_TOLERANCE_MS),
+            },
+            ...(unitId != null ? { bleUnitId: unitId } : {}),
+            ...(roomId != null ? { bleRoomId: roomId } : {}),
+          },
+          select: {
+            id: true, unitCode: true, lectureRoom: true, lessonType: true,
+            sessionStart: true, sessionDuration: true,
+            sessionKey: true, sessionNonce: true,
+            bleUnitId: true, bleRoomId: true,
+          },
+          orderBy: { sessionStart: "desc" },
+        });
+      }
+    }
 
     if (!session) {
       return NextResponse.json(
@@ -168,6 +217,28 @@ export async function POST(req: NextRequest) {
     });
     if (existing) {
       return NextResponse.json({ success: true, duplicate: true }, { status: 200, headers: corsHeaders });
+    }
+
+    // ── Step 5b: Device-uniqueness check ────────────────────────────────
+    // A single device must not mark attendance more than once for the same
+    // session, regardless of which student account is currently logged in.
+    // This mirrors the online endpoint's (sessionId, deviceId) uniqueness.
+    if (deviceId) {
+      const deviceAlreadyUsed = await prisma.offlineAttendanceRecord.findFirst({
+        where: {
+          deviceId,
+          unitCode:    canonicalUnitCode,
+          lectureRoom: canonicalLectureRoom,
+          sessionStart: canonicalStart,
+        },
+        select: { id: true },
+      });
+      if (deviceAlreadyUsed) {
+        return NextResponse.json(
+          { message: "This device has already been used to mark attendance for this session", reason: "DEVICE_ALREADY_USED" },
+          { status: 409, headers: corsHeaders },
+        );
+      }
     }
 
     // ── Step 6: Timestamp window — 2 h covers offline sync delay ─────────

@@ -30,6 +30,7 @@ import {
   decodeBLEBeacon,
   decodeQR,
   deriveCounter,
+  deriveAbsoluteCounter,
   QR_WINDOW_SECONDS,
   PIN_WINDOW_SECONDS,
   PIN_LENGTH,
@@ -170,7 +171,7 @@ export function validatePINEntry({ pin, cachedSession, atMs = Date.now() }) {
   if (!cachedSession)                   return fail('no_cached_session');
   if (!isSessionActive(cachedSession, atMs)) return fail('session_expired');
 
-  const pinCounter = deriveCounter(cachedSession.sessionStart, PIN_WINDOW_SECONDS, atMs);
+  const pinCounter = deriveAbsoluteCounter(cachedSession.sessionStart, PIN_WINDOW_SECONDS, atMs);
 
   return {
     valid:               true,

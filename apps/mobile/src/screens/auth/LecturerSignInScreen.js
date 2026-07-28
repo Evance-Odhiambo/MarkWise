@@ -201,6 +201,16 @@ export default function LecturerSignInScreen({ navigation }) {
           bounces={false}
           keyboardShouldPersistTaps="handled"
         >
+          <TouchableOpacity onPress={() => {
+            if (navigation?.canGoBack?.()) {
+              navigation.goBack();
+            } else {
+              navigation.replace('RoleSelection');
+            }
+          }} style={styles.backButton}>
+            <Icon name="arrow-left" size={22} color={C.text} />
+          </TouchableOpacity>
+
           {/* Hero Section */}
           <View style={styles.hero}>
             <View style={styles.brandRow}>
@@ -419,6 +429,11 @@ const makeStyles = (C) => StyleSheet.create({
   scrollContent: { 
     flexGrow: 1, 
     paddingBottom: 40 
+  },
+  backButton: {
+    paddingHorizontal: 24,
+    paddingTop: 12,
+    paddingBottom: 4,
   },
   hero: { 
     paddingTop: 40, 

@@ -1326,6 +1326,22 @@ const getOrCreateAttendanceDeviceId = async () => {
   }
 };
 
+const clearAttendanceDeviceId = async () => {
+  await initDatabase();
+
+  if (!isSQLiteAvailable()) {
+    memoryStore.attendanceDeviceId = null;
+    return;
+  }
+
+  try {
+    await executeSql(`DELETE FROM app_settings WHERE key = ?;`, [SETTINGS_KEYS.ATTENDANCE_DEVICE_ID]);
+  } catch (error) {
+    console.warn('[sqliteStorage] Failed to clear attendance device id:', error);
+    memoryStore.attendanceDeviceId = null;
+  }
+};
+
 const addConductedSession = async ({ unitCode, lectureRoom, sessionStart, createdAt, lessonType }) => {
   await initDatabase();
 
@@ -2251,6 +2267,7 @@ export default {
   addSharedMaterial,
   getSharedMaterials,
   getOrCreateAttendanceDeviceId,
+  clearAttendanceDeviceId,
   isSQLiteAvailable,
   hasAttendanceForSession,
   saveAttendanceSummaryCache,

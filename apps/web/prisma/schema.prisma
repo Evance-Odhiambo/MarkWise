@@ -378,12 +378,26 @@ model Student {
   groupMemberships         GroupMember[]
   submissions              Submission[]
   points                   StudentPoints?
+  devices                  StudentDevice[]
 
   @@unique([institutionId, admissionNumber])
   @@index([institutionId])
   @@index([courseId])
   @@index([departmentId])
   @@map("Student")
+}
+
+model StudentDevice {
+  id           String   @id @default(uuid())
+  studentId    String
+  deviceKey    String // 64-char hex device key for relay signature
+  registeredAt DateTime @default(now())
+  lastUsedAt   DateTime @default(now())
+  student      Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, deviceKey])
+  @@index([studentId])
+  @@map("StudentDevice")
 }
 
 model StudentPushToken {
@@ -720,6 +734,7 @@ model OfflineAttendanceRecord {
   @@index([unitCode, sessionStart])
   @@index([studentId, unitCode])
   @@index([conductedSessionId])
+  @@index([deviceId, unitCode, lectureRoom, sessionStart])
   @@map("OfflineAttendanceRecord")
 }
 

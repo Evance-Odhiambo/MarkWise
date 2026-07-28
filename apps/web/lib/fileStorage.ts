@@ -34,14 +34,25 @@ export interface SavedFile {
   fileSize: number;
 }
 
+async function uploadToVercelBlob(fileBuffer: Buffer, fileName: string, mimeType: string): Promise<SavedFile> {
+  const { put } = await import('@vercel/blob');
+  const blob = await put(fileName, Buffer.from(fileBuffer), {
+    contentType: mimeType,
+    access: 'public',
+  });
+  return {
+    fileUrl: blob.url,
+    mimeType,
+    fileSize: blob.size,
+  };
+}
+
 /**
- * Upload a Web API `File` to local filesystem and return the public URL.
+ * Upload a Web API `File` and return the public URL.
  *
- * Files are stored in `public/uploads/` directory, making them accessible
- * via the Next.js static file server at `/uploads/...`.
- * Videos are stored under `videos/` subfolder for organizational clarity.
- *
- * Throws an error with a `.status` property (400 / 413) on invalid input.
+ * Prefers Vercel Blob when `BLOB_READ_WRITE_TOKEN` is configured (Vercel /
+ * serverless / multi-instance deployments). Falls back to local disk under
+ * `public/uploads/` for traditional Node servers.
  */
 export async function saveUploadedFile(file: File): Promise<SavedFile> {
   if (file.size === 0) {
@@ -64,17 +75,21 @@ export async function saveUploadedFile(file: File): Promise<SavedFile> {
   const ext = (file.name ?? 'upload').split('.').pop()?.replace(/[^a-zA-Z0-9]/g, '').slice(0, 10) ?? 'bin';
   const folder = isVideo ? 'videos' : 'files';
   const filename = `${randomUUID()}.${ext}`;
-  
-  // Create the upload directory if it doesn't exist
+
+  // Use Vercel Blob when the write token is available. This preserves uploads
+  // in serverless environments where the project directory is read-only.
+  if (process.env.BLOB_READ_WRITE_TOKEN) {
+    const buffer = Buffer.from(await file.arrayBuffer());
+    return uploadToVercelBlob(buffer, `materials/${filename}`, mimeType);
+  }
+
   const uploadDir = join(process.cwd(), 'public', 'uploads', folder);
   await mkdir(uploadDir, { recursive: true });
-  
-  // Write file to disk
+
   const filePath = join(uploadDir, filename);
   const buffer = Buffer.from(await file.arrayBuffer());
   await writeFile(filePath, buffer);
-  
-  // Return public URL (served by Next.js static file handler)
+
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
   const publicUrl = `${baseUrl}/uploads/${folder}/${filename}`;
 

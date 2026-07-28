@@ -106,6 +106,22 @@ export function decodePayload(encoded) {
 // ─── Counter ─────────────────────────────────────────────────────────────────
 
 /**
+ * Derives a monotonically increasing time-window counter aligned to the
+ * absolute Unix epoch. Equivalently: floor(currentEpoch / window) - floor(start / window).
+ *
+ * For QR and BLE the backend verifies against an elapsed-time counter
+ * (`floor((scannedAt - sessionStart) / window)`), so deriveCounter() is correct
+ * for those formats.
+ *
+ * For manual attendance PINs the backend uses the absolute form above, so
+ * callers that need to match backend verification must use this function.
+ */
+export function deriveAbsoluteCounter(sessionStart, windowSeconds, atMs = Date.now()) {
+  const nowSec = Math.floor(atMs / 1000);
+  return Math.max(0, Math.floor(nowSec / windowSeconds) - Math.floor(sessionStart / windowSeconds));
+}
+
+/**
  * Derives a monotonically increasing time-window counter.
  * Increments by 1 every windowSeconds. Identical across all devices
  * with reasonably synchronised clocks.
@@ -275,6 +291,25 @@ export function decodeBLEBeacon(bytes) {
     roomId:        view.getUint16(6, false),
     lessonTypeId:  view.getUint8(8),
   };
+}
+
+// ─── Relay PIN (device-key-bound) ──────────────────────────────────────────────
+
+/**
+ * Derives a 6-digit relay PIN from the student's device key.
+ * Rotates every PIN_WINDOW_SECONDS (30 s). Unpredictable without the device key.
+ *
+ * @param deviceKey      — 64-char hex string from studentDeviceKey.getOrCreateDeviceKey()
+ * @param encodedPayload — output of encodePayload()
+ * @param counter        — deriveCounter(sessionStart, PIN_WINDOW_SECONDS)
+ * @param studentId      — student ID of the relay generator
+ * @returns              — 6-character digit string, e.g. "047291"
+ */
+export function computeRelayPin(deviceKey, encodedPayload, counter, studentId) {
+  const message = `${encodedPayload}|${counter}|${studentId}`;
+  const token = CryptoJS.HmacSHA256(message, deviceKey).toString(CryptoJS.enc.Hex);
+  const n = parseInt(token.substring(0, 8), 16) >>> 0;
+  return String(n % 1000000).padStart(PIN_LENGTH, '0');
 }
 
 // ─── Nonce generation ─────────────────────────────────────────────────────────

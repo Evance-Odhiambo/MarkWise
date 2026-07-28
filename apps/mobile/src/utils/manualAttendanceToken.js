@@ -28,6 +28,7 @@ import {
   encodePayload,
   computePIN,
   deriveCounter,
+  deriveAbsoluteCounter,
   PIN_WINDOW_SECONDS,
   PIN_LENGTH,
 } from './sessionCrypto';
@@ -73,7 +74,7 @@ export const generateManualAttendanceToken = ({ session, sessionKey, atMs = Date
     sessionStart == null || sessionDuration == null || sessionNonce == null
   ) return '';
   const encoded = encodePayload({ unitId, roomId, sessionStart, sessionDuration, sessionNonce });
-  const counter = deriveCounter(sessionStart, PIN_WINDOW_SECONDS, atMs);
+  const counter = deriveAbsoluteCounter(sessionStart, PIN_WINDOW_SECONDS, atMs);
   return computePIN(encoded, sessionKey, counter);
 };
 
@@ -130,7 +131,7 @@ export const validateManualAttendanceToken = ({
     return { isValid: false, reason: 'expired' };
   }
 
-  const pinCounter = deriveCounter(cachedSession.sessionStart, PIN_WINDOW_SECONDS, atMs);
+  const pinCounter = deriveAbsoluteCounter(cachedSession.sessionStart, PIN_WINDOW_SECONDS, atMs);
 
   return {
     isValid:             true,

@@ -36,6 +36,22 @@ function isLocalUri(uri) {
   return typeof uri === 'string' && (uri.startsWith('file://') || uri.startsWith('content://'));
 }
 
+async function resolveFileUri(uri) {
+  if (!uri) return '';
+  if (uri.startsWith('file://')) return uri.replace('file://', '');
+  if (uri.startsWith('content://')) {
+    try {
+      const dest = `${ReactNativeBlobUtil.fs.dirs.CacheDir}/upload_${Date.now()}`;
+      await ReactNativeBlobUtil.fs.cp(uri, dest);
+      return dest;
+    } catch (e) {
+      console.warn('[assignmentsApiV2] content:// copy failed, passing through:', e.message);
+      return uri;
+    }
+  }
+  return uri;
+}
+
 /**
  * Sends `body` as JSON when there are no local file attachments; falls back to
  * a multipart/form-data request (BlobUtil) when local URIs are present so the
@@ -45,11 +61,11 @@ async function requestWithAttachments(method, url, token, body) {
   const attachments = (body.attachments || []).filter(a => isLocalUri(a?.uri));
 
   if (attachments.length === 0) {
-    // Plain JSON — existing behaviour, no changes.
+    const { attachments: _drop, ...clean } = body;
     const res = await fetch(url, {
       method,
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(clean),
     });
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
@@ -61,21 +77,23 @@ async function requestWithAttachments(method, url, token, body) {
   }
 
   // Multipart — send JSON fields as `payload` + each file as `attachment`.
+  const resolvedAttachments = [];
+  for (const a of attachments) {
+    resolvedAttachments.push({
+      name: 'attachment',
+      filename: a.name || 'file',
+      type: a.type || 'application/octet-stream',
+      data: ReactNativeBlobUtil.wrap(await resolveFileUri(a.uri)),
+    });
+  }
+
   const parts = [
     {
       name: 'payload',
       data: JSON.stringify(body),
       type: 'application/json',
     },
-    ...attachments.map(a => ({
-      name: 'attachment',
-      filename: a.name || 'file',
-      type: a.type || 'application/octet-stream',
-      // BlobUtil.wrap(): strip file:// prefix; content:// passed as-is.
-      data: ReactNativeBlobUtil.wrap(
-        a.uri.startsWith('file://') ? a.uri.replace('file://', '') : a.uri,
-      ),
-    })),
+    ...resolvedAttachments,
   ];
 
   const res = await ReactNativeBlobUtil.fetch(
@@ -237,12 +255,7 @@ export async function fetchGroupSubmission(assignmentId, groupId) {
 // groupId is included when this is a group assignment.
 export async function uploadAssignmentFile(assignmentId, fileUri, fileName, mimeType, groupId) {
   const session = await getStudentSession();
-  // Use ReactNativeBlobUtil so content:// URIs from the SAF document picker are
-  // streamed correctly on Android 10+ scoped storage. FormData + fetch cannot read
-  // content:// URIs because the React Native networking layer lacks SAF support.
-  const resolvedUri = fileUri.startsWith('file://')
-    ? fileUri.replace('file://', '')
-    : fileUri; // content:// passed as-is to wrap()
+  const resolvedUri = await resolveFileUri(fileUri);
   const parts = [
     {
       name: 'file',
@@ -260,6 +273,10 @@ export async function uploadAssignmentFile(assignmentId, fileUri, fileName, mime
     parts,
   );
   const status = res.respInfo.status;
-  if (status < 200 || status >= 300) throw new Error('Failed to upload file submission');
+  if (status < 200 || status >= 300) {
+    let msg = `Failed to upload file submission (${status})`;
+    try { const j = JSON.parse(res.data); msg = j?.error || j?.message || msg; } catch (_) {}
+    throw new Error(msg);
+  }
   return JSON.parse(res.data);
 }

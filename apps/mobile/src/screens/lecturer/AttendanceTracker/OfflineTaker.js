@@ -15,6 +15,9 @@ import {
     Alert,
     Vibration,
     InteractionManager,
+    PermissionsAndroid,
+    Linking,
+    Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import QRCodeGenerator from '../../../components/QRCodeGenerator';
@@ -962,6 +965,60 @@ const OfflineTaker = () => {
     }, [selectedUnit, selectedRoom, isBluetoothOn, isAdvertisingSupported, sessionActive,
         sessionCounter, getUnitId, getRoomId, createPayload]);
 
+    const toggleBluetooth = async (enable) => {
+        if (!enable) {
+            Alert.alert('Disable Bluetooth', 'Use system settings to turn off Bluetooth.', [
+                { text: 'Open Settings', onPress: () => Linking.openSettings() },
+                { text: 'Cancel', style: 'cancel' },
+            ]);
+            return;
+        }
+
+        if (!BLEAdvertiserModule) {
+            Alert.alert('Bluetooth unavailable', 'Bluetooth functions are not available on this device.');
+            return;
+        }
+
+        if (Platform.OS === 'android' && BLEAdvertiserModule?.requestEnableBluetooth) {
+            try {
+                if (Platform.Version >= 31) {
+                    const granted = await PermissionsAndroid.request(
+                        PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+                        {
+                            title: 'Bluetooth permission',
+                            message: 'Required to enable and use Bluetooth.',
+                            buttonNeutral: 'Ask Me Later',
+                            buttonNegative: 'Cancel',
+                            buttonPositive: 'OK',
+                        }
+                    );
+                    if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+                        Alert.alert('Permission denied', 'Bluetooth permission is required to enable Bluetooth.');
+                        return;
+                    }
+                }
+
+                const enabled = await BLEAdvertiserModule.requestEnableBluetooth();
+                if (enabled) {
+                    setIsBluetoothOn(true);
+                    setBleError('');
+                    Alert.alert('Bluetooth enabled', 'Bluetooth is now on and ready to broadcast attendance signals.');
+                } else {
+                    Alert.alert('Bluetooth', 'Could not enable Bluetooth. Please turn it on in settings.');
+                }
+            } catch (e) {
+                console.error('Bluetooth enable error:', e);
+                Alert.alert('Bluetooth', 'Could not enable Bluetooth. Please try again or open settings.');
+            }
+            return;
+        }
+
+        Alert.alert('Enable Bluetooth', 'Please enable Bluetooth in system settings to broadcast attendance signals.', [
+            { text: 'Open Settings', onPress: () => Linking.openSettings() },
+            { text: 'Cancel', style: 'cancel' },
+        ]);
+    };
+
     // Main advertising effect
     useEffect(() => {
         let timerId;
@@ -1408,16 +1465,7 @@ const OfflineTaker = () => {
                     {!isBluetoothOn && (
                         <TouchableOpacity 
                             style={styles.enableBluetoothButton}
-                            onPress={() => {
-                                Alert.alert(
-                                    'Enable Bluetooth',
-                                    'Please enable Bluetooth in your system settings to broadcast attendance signals.',
-                                    [
-                                        { text: 'Cancel', style: 'cancel' },
-                                        { text: 'Open Settings', onPress: () => NativeModules.BluetoothManager?.openSettings() }
-                                    ]
-                                );
-                            }}
+                            onPress={() => toggleBluetooth(true)}
                         >
                             <Text style={styles.enableBluetoothText}>Enable Bluetooth</Text>
                         </TouchableOpacity>
