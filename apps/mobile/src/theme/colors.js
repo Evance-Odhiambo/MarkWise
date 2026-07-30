@@ -77,7 +77,7 @@ const colors = {
 
   // ── Light theme chrome (page / surface / text / border) ──────────────────
   background: {
-    primary:   palette.slate50,    // #F8FAFC  page
+    primary:   palette.slate50,    // #c2d8ee  page
     secondary: palette.slate100,   // #F1F5F9
     tertiary:  palette.slate200,   // #E2E8F0
     card:      palette.white,      // #FFFFFF

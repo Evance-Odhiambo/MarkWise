@@ -1,6 +1,8 @@
+import { API_BASE_URL } from './constants';
+
 const PROBE_URLS = [
+  `${API_BASE_URL}/api/health`,
   'https://clients3.google.com/generate_204',
-  'https://www.google.com/generate_204',
 ];
 
 const PROBE_TIMEOUT_MS = 4500;

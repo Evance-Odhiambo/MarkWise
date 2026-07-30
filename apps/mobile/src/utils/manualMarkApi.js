@@ -26,22 +26,25 @@ const normalizeRoomCode = (room) =>
 const normalizeAdmNumber = (adm) => String(adm || '').trim().toUpperCase();
 
 // Cache duration constants
-const CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
+const MANUAL_MARK_CACHE_DURATION_MS = 2 * 60 * 60 * 1000; // 2 hours for manual mark roster
 
 // Remember which roster endpoint worked last so we skip failed ones on the next call.
 let _lastWorkingEndpoint = null;
 
 /**
  * Check if roster cache is still valid
+ * @param {string} unitCode
+ * @param {string} institutionId
+ * @param {number} [maxAgeMs] - Maximum cache age in milliseconds (default: 24h for general, 2h for manual marks)
  */
-export const isRosterCacheValid = async (unitCode, institutionId) => {
+export const isRosterCacheValid = async (unitCode, institutionId, maxAgeMs = MANUAL_MARK_CACHE_DURATION_MS) => {
     if (!unitCode) return false;
     try {
         const normalizedCode = normalizeUnitCode(unitCode);
         const cacheMeta = await sqliteStorage.getUnitRosterCacheMeta(normalizedCode, institutionId || '');
         if (!cacheMeta) return false;
         
-        const isValid = Date.now() - (cacheMeta.last_updated || 0) < CACHE_DURATION_MS;
+        const isValid = Date.now() - (cacheMeta.last_updated || 0) < maxAgeMs;
         return isValid && (cacheMeta.student_count > 0);
     } catch (err) {
         console.warn('[manualMarkApi] Error checking cache validity:', err);
@@ -51,8 +54,11 @@ export const isRosterCacheValid = async (unitCode, institutionId) => {
 
 /**
  * Get roster status for a unit (returns count and validity)
+ * @param {string} unitCode
+ * @param {string} institutionId
+ * @param {number} [maxAgeMs] - Maximum cache age in milliseconds
  */
-export const getRosterStatus = async (unitCode, institutionId) => {
+export const getRosterStatus = async (unitCode, institutionId, maxAgeMs = MANUAL_MARK_CACHE_DURATION_MS) => {
     if (!unitCode) return { hasCache: false, studentCount: 0, isValid: false };
     try {
         const normalizedCode = normalizeUnitCode(unitCode);
@@ -60,7 +66,7 @@ export const getRosterStatus = async (unitCode, institutionId) => {
         // Try to get metadata first
         const cacheMeta = await sqliteStorage.getUnitRosterCacheMeta(normalizedCode, institutionId || '');
         if (cacheMeta) {
-            const isValid = Date.now() - (cacheMeta.last_updated || 0) < CACHE_DURATION_MS;
+            const isValid = Date.now() - (cacheMeta.last_updated || 0) < maxAgeMs;
             return {
                 hasCache: true,
                 studentCount: cacheMeta.student_count || 0,

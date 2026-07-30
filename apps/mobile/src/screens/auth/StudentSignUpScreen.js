@@ -20,6 +20,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import LinearGradient from 'react-native-linear-gradient';
 import { signUpStudentAccount, verifyStudentAdmissionNumber } from '../../utils/studentAuthApi';
 import { fetchInstitutions } from '../../utils/lecturerAuthApi';
+import { resolveApiBaseUrl } from '../../utils/unitsApi';
 import { hasInternetConnection } from '../../utils/connectivity';
 import ConnectivityBanner from '../../components/ConnectivityBanner';
 import useResponsive from '../../hooks/useResponsive';
@@ -140,10 +141,19 @@ export default function StudentSignUpScreen({ navigation }) {
       
       setIsLoadingCampuses(true);
       try {
-        const baseUrl = await import('../../utils/unitsApi').then(m => m.resolveApiBaseUrl());
-        const response = await fetch(`${baseUrl}/api/institution/${institutionId}/campuses`);
-        const data = await response.json();
-        setCampuses(Array.isArray(data) ? data : (data.campuses || data.data || []));
+        const baseUrl = resolveApiBaseUrl();
+        const response = await fetch(`${baseUrl}/api/institution/${institutionId}/campuses`, {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Campuses fetch failed: ${response.status}`);
+        }
+        
+        const payload = await response.json();
+        const list = Array.isArray(payload) ? payload : (payload.campuses || payload.data || []);
+        setCampuses(Array.isArray(list) ? list : []);
       } catch (error) {
         console.error('Failed to load campuses:', error);
         setCampuses([]);

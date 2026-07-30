@@ -3,6 +3,22 @@ import { resolveApiBaseUrl } from './unitsApi';
 import { hasInternetConnection } from './connectivity';
 
 const TIMETABLE_CACHE_KEY = '@markwise_lecturer_timetable_cache';
+const API_TIMEOUT_MS = 15000;
+
+const withTimeout = async (promise, ms = API_TIMEOUT_MS) => {
+  let timeoutId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error('Request timed out. Please check your connection and try again.')), ms);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+const fetchWithTimeout = async (url, options = {}, ms = API_TIMEOUT_MS) =>
+  withTimeout(fetch(url, options), ms);
 
 // Set to true when the last call to fetchMyLecturerTimetable returned cached data.
 let _lastFetchWasCached = false;
@@ -154,7 +170,7 @@ const extractEndTime = (entry) => firstNonEmptyString(
   entry?.window?.end, entry?.window?.to,
 );
 
-const normalizeEntry = (entry) => {
+export const normalizeEntry = (entry) => {
   const unitCode = firstNonEmptyString(
     entry?.unitCode,
     entry?.code,
@@ -388,6 +404,23 @@ const normalizeEntry = (entry) => {
     roomCode,
     lectureRoom,
     status,
+    rescheduledTo: firstNonEmptyString(
+      entry?.rescheduledTo,
+      entry?.rescheduled_to,
+      entry?.rescheduleTime,
+      entry?.reschedule_time,
+      entry?.newTime,
+      entry?.new_time,
+    ) || null,
+    rescheduledVenue: firstNonEmptyString(
+      entry?.rescheduledVenue,
+      entry?.rescheduled_venue,
+      entry?.newVenue,
+      entry?.new_venue,
+      entry?.rescheduleVenue,
+      entry?.reschedule_venue,
+    ) || null,
+    reschedulePermanent: entry?.reschedulePermanent ?? entry?.reschedule_permanent ?? null,
     unitId,
     roomId,
     meetingLink: meetingLink || null,
@@ -487,11 +520,6 @@ export const updateLecturerTimetableEntryStatus = async ({
     throw new Error('Missing lecturer access token');
   }
 
-  const isConnected = await hasInternetConnection();
-  if (!isConnected) {
-    throw new Error('No internet connection. Connect to the internet to update timetable status.');
-  }
-
   const normalizedEntryId = String(entryId || '').trim();
   if (!normalizedEntryId) {
     throw new Error('Missing timetable entry id');
@@ -559,7 +587,7 @@ export const updateLecturerTimetableEntryStatus = async ({
   };
 
   const primaryUrl = `${baseUrl}/api/timetable/${encodeURIComponent(normalizedEntryId)}`;
-  const primaryResponse = await fetch(primaryUrl, requestOptions);
+  const primaryResponse = await fetchWithTimeout(primaryUrl, requestOptions);
   const primaryPayload = await parseResponsePayload(primaryResponse);
 
   if (primaryResponse.ok) {
@@ -574,7 +602,7 @@ export const updateLecturerTimetableEntryStatus = async ({
   }
 
   const fallbackUrl = `${baseUrl}/api/timetable/${encodeURIComponent(normalizedEntryId)}/status`;
-  const fallbackResponse = await fetch(fallbackUrl, requestOptions);
+  const fallbackResponse = await fetchWithTimeout(fallbackUrl, requestOptions);
   const fallbackPayload = await parseResponsePayload(fallbackResponse);
 
   if (!fallbackResponse.ok) {

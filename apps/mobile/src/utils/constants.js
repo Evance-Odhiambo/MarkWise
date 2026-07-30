@@ -48,6 +48,7 @@ export const getLessonTypeByName = (nameOrCode) => {
 // Shared timing constants for QR rotation and timestamp tolerance
 export const QR_ROTATION_MS = 3000; // QR rotates every 3 seconds
 export const TIMESTAMP_TOLERANCE_MS = 3000; // Accept timestamps within ±3 seconds
+export const CLOCK_SKEW_TOLERANCE_MS = 15000; // Allow ±15s clock skew for session-start checks
 export const MANUAL_TOKEN_ROTATION_MS = 30000; // Manual token rotates every 30 seconds
 
 // Default attendance session duration (10 minutes)

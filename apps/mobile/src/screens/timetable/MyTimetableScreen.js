@@ -1,5 +1,5 @@
 // FILE: src/screens/timetable/MyTimetableScreen.js
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import { useEnrollment } from '../../context/EnrollmentContext';
 import { useStudentTimetableSync } from '../../hooks/useStudentTimetableSync';
 
 import { getLessonTypeByName } from '../../utils/constants';
+import { parseRescheduledInfo } from '../../utils/rescheduleInfo';
 import themeColors from '../../theme/colors';
 import { useColors } from '../../theme';
 
@@ -49,19 +50,18 @@ const getLastWeekReset = () => {
 
 const WEEKLY_STATUSES = new Set(['Cancelled', 'Rescheduled', 'Online']);
 
-const parseRescheduledTo = (rescheduledTo) => {
-  if (!rescheduledTo) return { time: null, roomCode: null };
-  const dotIdx = rescheduledTo.indexOf('·');
-  if (dotIdx !== -1) {
-    return {
-      time: rescheduledTo.slice(0, dotIdx).trim() || null,
-      roomCode: rescheduledTo.slice(dotIdx + 1).trim() || null,
-    };
-  }
-  return { time: rescheduledTo.trim() || null, roomCode: null };
-};
+const parseRescheduledTo = (rescheduledTo, rescheduledVenue) => parseRescheduledInfo(rescheduledTo, rescheduledVenue);
 
 const getEffectiveStatus = (lesson) => {
+  const hasRescheduleData = Boolean(
+    lesson?.rescheduledTo ||
+    lesson?.rescheduled_to ||
+    lesson?.rescheduledVenue ||
+    lesson?.rescheduled_venue
+  );
+  if ((lesson?.status === 'Rescheduled' || hasRescheduleData) && (lesson?.rescheduledTo || lesson?.rescheduled_to || lesson?.rescheduledVenue || lesson?.rescheduled_venue)) {
+    return 'Rescheduled';
+  }
   const stored = String(lesson?.status || 'Pending').trim() || 'Pending';
   if (!WEEKLY_STATUSES.has(stored)) return stored;
   const updatedAt = lesson?.updatedAt ? new Date(lesson.updatedAt) : null;
@@ -264,7 +264,7 @@ export default function MyTimetableScreen() {
         )}
 
         {lesson.status === 'Rescheduled' && (() => {
-          const { time: newTime, roomCode: newRoom } = parseRescheduledTo(lesson.rescheduledTo);
+          const { time: newTime, roomCode: newRoom } = parseRescheduledTo(lesson.rescheduledTo, lesson.rescheduledVenue);
           return (
             <View style={styles.rescheduleBanner}>
               <View style={styles.rescheduleHeader}>
@@ -332,6 +332,19 @@ export default function MyTimetableScreen() {
   } = useStudentTimetableSync();
   const [refreshing, setRefreshing] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState('all');
+
+  // Handle manual refresh with proper state management
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refreshTimetable();
+    } catch (error) {
+      console.warn('[MyTimetable] Refresh error:', error);
+    } finally {
+      // Small delay to ensure UI updates are visible
+      setTimeout(() => setRefreshing(false), 300);
+    }
+  }, [refreshTimetable]);
   const [activeDay, setActiveDay] = useState(null);
   const [stats, setStats] = useState({ total: 0, confirmed: 0, pending: 0, cancelled: 0, rescheduled: 0, online: 0 });
 
@@ -519,7 +532,7 @@ export default function MyTimetableScreen() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={onRefresh}
+            onRefresh={handleRefresh}
             tintColor={colors.primary.main}
             colors={[colors.primary.main]}
           />

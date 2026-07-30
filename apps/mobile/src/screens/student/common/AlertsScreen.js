@@ -598,12 +598,10 @@ export default function AlertsScreen() {
         if ((lesson.status === 'Cancelled' || lesson.status === 'Rescheduled' || lesson.status === 'Pending') && !seenLessonIds.has(lesson.id)) {
           seenLessonIds.add(lesson.id);
           let alertMessage;
-          if (lesson.status === 'Rescheduled' && lesson.rescheduledTo) {
-            const dotIdx = lesson.rescheduledTo.indexOf('·');
-            const newTime = dotIdx !== -1 ? lesson.rescheduledTo.slice(0, dotIdx).trim() : lesson.rescheduledTo.trim();
-            const newRoom = dotIdx !== -1 ? lesson.rescheduledTo.slice(dotIdx + 1).trim() : (lesson.rescheduledVenue || lesson.roomCode || lesson.venue || 'TBA');
+          if (lesson.status === 'Rescheduled' && (lesson.rescheduledTo || lesson.rescheduledVenue)) {
+            const { time: newTime, roomCode: newRoom } = parseRescheduledInfo(lesson.rescheduledTo, lesson.rescheduledVenue);
             const scope = lesson.reschedulePermanent ? 'Permanent' : 'This week';
-            alertMessage = `Moved to ${newTime} · ${newRoom} (${scope})`;
+            alertMessage = `Moved to ${newTime || lesson.time || 'TBA'} · ${newRoom || lesson.roomCode || lesson.venue || 'TBA'} (${scope})`;
           } else {
             alertMessage = `${lesson.day || day.day || ''} ${lesson.time || ''} · ${lesson.roomCode || lesson.venue || 'Venue TBA'}`.trim();
           }

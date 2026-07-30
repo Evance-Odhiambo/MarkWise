@@ -1,6 +1,14 @@
 import { resolveApiBaseUrl } from './unitsApi';
 import { hasInternetConnection } from './connectivity';
 
+const FETCH_TIMEOUT_MS = 15_000;
+
+const fetchWithTimeout = (url, options) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+};
+
 const parseResponsePayload = async (response) => {
   const contentType = response.headers.get('content-type') || '';
   if (contentType.toLowerCase().includes('application/json')) {
@@ -237,7 +245,7 @@ export const fetchStudentTimetableSnapshot = async ({ accessToken, etag } = {}) 
     headers['If-None-Match'] = normalizedEtag;
   }
 
-  const response = await fetch(`${baseUrl}/api/student/timetable`, {
+  const response = await fetchWithTimeout(`${baseUrl}/api/student/timetable`, {
     method: 'GET',
     headers,
   });
@@ -278,7 +286,7 @@ export const fetchStudentExtraSessions = async (accessToken) => {
   if (!token) return [];
   try {
     const baseUrl = resolveApiBaseUrl();
-    const res = await fetch(`${baseUrl}/api/timetable/extra-sessions/student`, {
+    const res = await fetchWithTimeout(`${baseUrl}/api/timetable/extra-sessions/student`, {
       headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return [];

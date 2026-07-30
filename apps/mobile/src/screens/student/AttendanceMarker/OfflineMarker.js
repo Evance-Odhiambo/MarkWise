@@ -40,6 +40,7 @@ import getBleManager from '../../../utils/bleManager';
 import {
     QR_ROTATION_MS,
     TIMESTAMP_TOLERANCE_MS,
+    CLOCK_SKEW_TOLERANCE_MS,
     SESSION_DURATION_MS,
     GD_SESSION_DURATION_MS,
     MANUAL_TOKEN_ROTATION_MS,
@@ -54,13 +55,14 @@ import sessionManager from '../../../utils/sessionManager';
 import sqliteStorage from '../../../storage/sqliteStorage';
 import { useEnrollment } from '../../../context/EnrollmentContext';
 import OfflineBanner from '../../../components/OfflineBanner';
+import useInternetStatus from '../../../hooks/useInternetStatus';
 
 import {
-    validateManualAttendanceToken,
     normalizeManualAttendanceTokenInput,
 } from '../../../utils/manualAttendanceToken';
+import { validatePINEntry } from '../../../utils/attendanceValidator';
 import { decodeQrPayload } from '../../../utils/qrSigning';
-import { decodeBLEBeacon, encodeBLEBeacon, deriveCounter, QR_WINDOW_SECONDS } from '../../../utils/sessionCrypto';
+import { decodeBLEBeacon, encodeBLEBeacon, deriveCounter, deriveAbsoluteCounter, encodePayload, QR_WINDOW_SECONDS, PIN_WINDOW_SECONDS, computeRelayPin } from '../../../utils/sessionCrypto';
 import { adaptiveConfig, useAdaptiveAttendance } from '../../../utils/adaptiveAttendanceConfig';
 import { getStudentSession } from '../../../utils/authSession';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -164,6 +166,115 @@ const formatManualRoomInput = (value) => {
     if (!compact) return '';
     const firstDigitIndex = compact.search(/\d/);
     return firstDigitIndex > 0 ? `${compact.slice(0, firstDigitIndex)} ${compact.slice(firstDigitIndex)}` : compact;
+};
+
+const normalizeRoomCode = (roomCode) =>
+    String(roomCode || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+// Storage key for detected sessions cache (for PIN fallback)
+const DETECTED_SESSIONS_CACHE_KEY = '@markwise_detected_sessions_v1';
+
+// Cache a detected session for PIN fallback (called when BLE beacon detected)
+const cacheDetectedSession = async ({ unitCode, lectureRoom, sessionStart }) => {
+    try {
+        const normalizedUnitCode = normalizeUnitCode(unitCode);
+        const normalizedRoomCode = normalizeRoomCode(lectureRoom);
+        
+        // Load existing cache
+        const cacheJson = await AsyncStorage.getItem(DETECTED_SESSIONS_CACHE_KEY);
+        const cache = cacheJson ? JSON.parse(cacheJson) : {};
+        
+        // Store session by unitCode+roomCode key
+        const cacheKey = `${normalizedUnitCode}|${normalizedRoomCode}`;
+        cache[cacheKey] = {
+            unitCode: normalizedUnitCode,
+            lectureRoom: normalizedRoomCode,
+            sessionStart: Number(sessionStart),
+            detectedAt: Date.now(),
+        };
+        
+        // Clean up old sessions (older than 24 hours)
+        const oneDayMs = 24 * 60 * 60 * 1000;
+        const now = Date.now();
+        Object.keys(cache).forEach(key => {
+            if (now - cache[key].detectedAt > oneDayMs) {
+                delete cache[key];
+            }
+        });
+        
+        await AsyncStorage.setItem(DETECTED_SESSIONS_CACHE_KEY, JSON.stringify(cache));
+    } catch (err) {
+        console.warn('[PIN Cache] Failed to cache detected session:', err);
+    }
+};
+
+const findCachedSessionForManualPin = async ({ unitCode, lectureRoom, manualSessionDurationMs }) => {
+    if (!unitCode || !lectureRoom || !Number.isFinite(manualSessionDurationMs) || manualSessionDurationMs <= 0) return null;
+    const normalizedUnitCode = normalizeUnitCode(unitCode);
+    const normalizedRoomCode = normalizeRoomCode(lectureRoom);
+    
+    // First try: detected sessions cache (populated when BLE beacons are detected)
+    try {
+        const cacheJson = await AsyncStorage.getItem(DETECTED_SESSIONS_CACHE_KEY);
+        if (cacheJson) {
+            const cache = JSON.parse(cacheJson);
+            const cacheKey = `${normalizedUnitCode}|${normalizedRoomCode}`;
+            const cachedSession = cache[cacheKey];
+            
+            if (cachedSession) {
+                const now = Date.now();
+                const allowedSkewMs = 15_000;
+                const sessionStartMs = Number(cachedSession.sessionStart);
+                
+                // Check if session is still active
+                if (
+                    Number.isFinite(sessionStartMs) &&
+                    now >= sessionStartMs - allowedSkewMs &&
+                    now <= sessionStartMs + manualSessionDurationMs + allowedSkewMs
+                ) {
+                    return {
+                        lectureRoom: normalizedRoomCode,
+                        sessionStartMs,
+                    };
+                }
+            }
+        }
+    } catch (err) {
+        console.warn('[PIN Cache] Failed to read detected sessions cache:', err);
+    }
+    
+    // Fallback: try conducted_sessions table (lecturer devices only)
+    const sessions = await sqliteStorage.getConductedSessionsForUnit(normalizedUnitCode).catch(() => []);
+    if (!Array.isArray(sessions) || sessions.length === 0) return null;
+
+    const now = Date.now();
+    const allowedSkewMs = 15_000;
+    const candidates = sessions
+        .map((session) => ({
+            lectureRoom: normalizeRoomCode(session.lecture_room),
+            sessionStartMs: Number(session.session_start),
+        }))
+        .filter((session) =>
+            session.lectureRoom === normalizedRoomCode &&
+            Number.isFinite(session.sessionStartMs) &&
+            now >= session.sessionStartMs - allowedSkewMs &&
+            now <= session.sessionStartMs + manualSessionDurationMs + allowedSkewMs
+        )
+        .sort((a, b) => b.sessionStartMs - a.sessionStartMs);
+
+    return candidates.length > 0 ? candidates[0] : null;
+};
+
+// Offline-first fallback: construct a session record from current time when no
+// cached session is available. The PIN itself is verified server-side on sync,
+// so the exact session start only affects the local UX window check.
+const buildApproximateSessionForManualPin = ({ unitCode, lectureRoom, manualSessionDurationMs }) => {
+    const now = Date.now();
+    const sessionStartMs = now;
+    return {
+        lectureRoom: normalizeRoomCode(lectureRoom),
+        sessionStartMs,
+    };
 };
 
 const persistAttendance = async ({ unitCode, lectureRoom, sessionStart, rawPayload, deviceId, synced = 0, lessonType = null }) => {
@@ -438,12 +549,23 @@ const ManualPinDialog = ({
 
                                     <TouchableOpacity
                                         onPress={onSubmit}
-                                        disabled={isSubmitting || !manualTokenInput.trim() || !manualUnitCodeInput || !manualLectureRoomInput}
+                                        disabled={
+                                            isSubmitting ||
+                                            !manualTokenInput.trim() ||
+                                            !manualUnitCodeInput ||
+                                            !manualLectureRoomInput ||
+                                            normalizeManualAttendanceTokenInput(manualTokenInput).length !== 6
+                                        }
                                     >
                                         <LinearGradient
-                                            colors={manualTokenInput.trim() && manualUnitCodeInput && manualLectureRoomInput
-                                                ? colors.success.gradient
-                                                : [colors.surface.tertiary, colors.surface.tertiary]}
+                                            colors={
+                                                manualTokenInput.trim() &&
+                                                manualUnitCodeInput &&
+                                                manualLectureRoomInput &&
+                                                normalizeManualAttendanceTokenInput(manualTokenInput).length === 6
+                                                    ? colors.success.gradient
+                                                    : [colors.surface.tertiary, colors.surface.tertiary]
+                                            }
                                             style={styles.dialogSubmitButton}
                                         >
                                             {isSubmitting ? (
@@ -555,7 +677,7 @@ const OfflineMarker = () => {
     const [isBluetoothOn, setIsBluetoothOn] = useState(false);
     const [bleScanError, setBleScanError] = useState('');
     const [bleAdvertisingError, setBleAdvertisingError] = useState('');
-    const { hasPermission, openSettings } = usePermissions();
+    const { hasPermission, openSettings} = usePermissions();
     const [sessionRemainingMs, setSessionRemainingMs] = useState(null);
     const [sessionActive, setSessionActive] = useState(false);
     const [showInfoModal, setShowInfoModal] = useState(false);
@@ -568,9 +690,11 @@ const OfflineMarker = () => {
     const [manualUnitCodeInput, setManualUnitCodeInput] = useState('');
     const [manualLectureRoomInput, setManualLectureRoomInput] = useState('');
     const [relayManualPin, setRelayManualPin] = useState('');
+    const [attendanceMethod, setAttendanceMethod] = useState(null); // 'qr' | 'ble' | 'pin'
     const [manualTokenRemainingSec, setManualTokenRemainingSec] = useState(
         Math.ceil(MANUAL_TOKEN_ROTATION_MS / 1000),
     );
+    const [qrRefreshSec, setQrRefreshSec] = useState(Math.ceil(QR_ROTATION_MS / 1000));
     const [isMotionVerified, setIsMotionVerified] = useState(false);
     const [activeTab, setActiveTab] = useState('scan');
     const [isCameraReady, setIsCameraReady] = useState(false);
@@ -587,6 +711,7 @@ const OfflineMarker = () => {
     const [isScanCooldown, setIsScanCooldown] = useState(false);
     // Mirrors receivedSessionNonceRef for PIN-marked students; triggers relay useEffect re-run
     const [peerSessionNonce, setPeerSessionNonce] = useState(null);
+    const { isOnline } = useInternetStatus();
 
     // Animation refs
     const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -993,10 +1118,18 @@ const OfflineMarker = () => {
                 if (scannedDataRef.current) {
                     generateNewQrData();
                 } else {
-                    // Check for attendance marked while backgrounded
+                    // Check for attendance marked while backgrounded.
+                    // Retry a few times with small delays because the background task
+                    // may still be writing to AsyncStorage when the foreground app
+                    // regains control.
                     try {
                         const { BG_STUDENT_RESULT_KEY } = require('../../../services/backgroundBLEService');
-                        const raw = await AsyncStorage.getItem(BG_STUDENT_RESULT_KEY);
+                        let raw = null;
+                        for (let attempt = 0; attempt < 5; attempt++) {
+                            raw = await AsyncStorage.getItem(BG_STUDENT_RESULT_KEY);
+                            if (raw) break;
+                            if (attempt < 4) await new Promise(r => setTimeout(r, 200));
+                        }
                         if (raw) {
                             await AsyncStorage.removeItem(BG_STUDENT_RESULT_KEY);
                             const bgResult = JSON.parse(raw);
@@ -1009,6 +1142,7 @@ const OfflineMarker = () => {
                                     sessionStart: bgResult.sessionStart,
                                 },
                             });
+                            setAttendanceMethod('ble');
                         }
                     } catch {}
                 }
@@ -1189,6 +1323,12 @@ const OfflineMarker = () => {
         // receivedSessionNonceRef.current is set before setScannedData in BLE/QR success paths.
         // For PIN marks it starts null and is populated once a peer beacon nonce is captured.
         const sessionNonce = receivedSessionNonceRef.current;
+        const relayAllowed = attendanceMethod !== 'pin' || sessionNonce !== null;
+
+        if (!relayAllowed) {
+            stopAdvertising();
+            return;
+        }
 
         if (scannedData && sessionActive && isBluetoothOn && isAdvertisingSupported &&
                 scannedData.details && sessionNonce !== null) {
@@ -1291,6 +1431,9 @@ const OfflineMarker = () => {
         setIsAutoMarking(true);
         setAutoMarkProgress(30);
         const { unitCode, lectureRoom, sessionStart } = parsed;
+        
+        // Cache session info for PIN fallback (non-blocking)
+        cacheDetectedSession({ unitCode, lectureRoom, sessionStart }).catch(() => {});
         const sessionKey = `${unitCode}|${lectureRoom}|${sessionStart}`;
         // If all checks except motion pass, do NOT block on 'Already detected' -- allow pending motion
         if (seenSessionsRef.current.has(sessionKey)) {
@@ -1368,7 +1511,7 @@ const OfflineMarker = () => {
             if (saveResult?.saved) {
                 seenSessionsRef.current.add(sessionKey);
                 setAutoMarkProgress(100);
-                setFeedbackMessage('✓ Auto-marked!');
+                setFeedbackMessage(isOnline ? '✓ Auto-marked!' : '✓ Saved locally — will sync when online');
                 receivedSessionNonceRef.current = parsed.raw?.sessionNonce ?? null; // nonce for secure peer re-advertising
                 setScannedData({
                     data: JSON.stringify(parsed),
@@ -1394,6 +1537,10 @@ const OfflineMarker = () => {
                 setIsAutoMarking(true);
                 setAutoMarkProgress(30);
                 const { unitCode, lectureRoom, sessionStart } = parsed;
+                
+                // Cache session info for PIN fallback (non-blocking)
+                cacheDetectedSession({ unitCode, lectureRoom, sessionStart }).catch(() => {});
+                
                 const sessionKey = `${unitCode}|${lectureRoom}|${sessionStart}`;
                 // Do NOT check seenSessionsRef here; allow marking after motion
                 if (!checkEnrollment(unitCode)) {
@@ -1432,8 +1579,9 @@ const OfflineMarker = () => {
                 }
                 if (saveResult?.saved) {
                     seenSessionsRef.current.add(sessionKey);
+                    setAttendanceMethod('ble');
                     setAutoMarkProgress(100);
-                    setFeedbackMessage('✓ Auto-marked!');
+                    setFeedbackMessage(isOnline ? '✓ Auto-marked!' : '✓ Saved locally — will sync when online');
                     receivedSessionNonceRef.current = parsed.raw?.sessionNonce ?? null; // nonce for secure peer re-advertising
                     setScannedData({
                         data: JSON.stringify(parsed),
@@ -1441,13 +1589,15 @@ const OfflineMarker = () => {
                     });
                     Vibration.vibrate([0, 100, 50, 100]);
                     resetAutoMark(true);
+                    // Immediately generate QR/PIN for peer relay
+                    generateNewQrData();
                 } else {
                     setBleFeedbackMessage('Save failed');
                     setIsAutoMarking(false);
                 }
             })();
         }
-    }, [pendingMotionSession, isMotionVerified, checkEnrollment, attendanceDeviceId, resetAutoMark]);
+    }, [pendingMotionSession, isMotionVerified, checkEnrollment, attendanceDeviceId, resetAutoMark, generateNewQrData]);
 
     // ===== BLE SCANNER =====
     useEffect(() => {
@@ -1617,15 +1767,143 @@ const OfflineMarker = () => {
                 }
             };
         }
-    }, [isBluetoothOn, parseBinaryPayload, handleBLEDetection, scannedData, peerSessionNonce, isAutoMarking]);
+    }, [attendanceMethod, isBluetoothOn, parseBinaryPayload, handleBLEDetection, scannedData, peerSessionNonce, isAutoMarking]);
 
-    const generateNewQrData = useCallback(() => {
-        // QR relay: re-display the original MWQR0x01 token received from the lecturer.
-        // The embedded HMAC is still verifiable by the backend at sync time.
-        setRegeneratedQrData(receivedQrDataRef.current || '');
-        // PIN relay: show the 6-digit PIN entered by this student (valid for PIN_WINDOW_SECONDS).
-        setRelayManualPin(relayPinRef.current || '');
-    }, []);
+    /**
+     * Validate a relay PIN locally (instant validation without backend)
+     * Uses the same deterministic formula as generateNewQrData()
+     * 
+     * @param {string} inputPin - 6-digit PIN entered by user
+     * @param {number} nowMs - Current timestamp in milliseconds
+     * @returns {boolean} - true if PIN is valid for current time window
+     */
+    const validateRelayPinLocally = useCallback(async (inputPin, nowMs = Date.now()) => {
+        if (!scannedData?.details) {
+            console.warn('[RelayPIN] No scanned session data');
+            return false;
+        }
+
+        try {
+            const { unitCode, lectureRoom, sessionStart } = scannedData.details;
+            const sessionNonce = receivedSessionNonceRef.current;
+            
+            if (!sessionNonce || !unitCode || !lectureRoom || !sessionStart) {
+                console.warn('[RelayPIN] Missing session parameters');
+                return false;
+            }
+
+            // Get unit and room IDs
+            const unitId = adaptiveConfig.getUnitId(unitCode);
+            const roomId = adaptiveConfig.getRoomId(lectureRoom);
+            
+            if (unitId == null || roomId == null) {
+                console.warn('[RelayPIN] Cannot resolve unitId or roomId');
+                return false;
+            }
+
+            const sessionStartSec = Math.floor(sessionStart / 1000);
+            const pinCounter = deriveAbsoluteCounter(sessionStartSec, PIN_WINDOW_SECONDS, nowMs);
+            
+            const { getOrCreateDeviceKey } = require('../../../utils/studentDeviceKey');
+            const deviceKey = await getOrCreateDeviceKey();
+            const studentSession = await getStudentSession();
+            if (!deviceKey || !studentSession?.studentId) {
+                console.warn('[RelayPIN] Missing device key or student ID');
+                return false;
+            }
+
+            const encodedPayload = encodePayload({
+                unitId,
+                roomId,
+                sessionStart: sessionStartSec,
+                sessionDuration: 3600,
+                sessionNonce,
+            });
+            const expectedPin = computeRelayPin(deviceKey, encodedPayload, pinCounter, studentSession.studentId);
+            
+            const isValid = inputPin === expectedPin;
+            console.log(`[RelayPIN] Validation: ${isValid ? 'PASS' : 'FAIL'} (input=${inputPin}, expected=${expectedPin})`);
+            return isValid;
+        } catch (err) {
+            console.error('[RelayPIN] Validation error:', err);
+            return false;
+        }
+    }, [scannedData]);
+
+    const generateNewQrData = useCallback(async () => {
+        if (!scannedData?.details) {
+            setRegeneratedQrData('');
+            setRelayManualPin('');
+            return;
+        }
+
+        try {
+            const { unitCode, lectureRoom, sessionStart } = scannedData.details;
+            const sessionNonce = receivedSessionNonceRef.current;
+            
+            if (!sessionNonce || !unitCode || !lectureRoom || !sessionStart) {
+                console.warn('[Relay] Missing session data');
+                setRegeneratedQrData('');
+                setRelayManualPin('');
+                return;
+            }
+
+            // Get student session
+            const studentSession = await getStudentSession();
+            if (!studentSession?.studentId) {
+                console.warn('[Relay] No student session');
+                return;
+            }
+
+            // Get device key for relay signature
+            const { getOrCreateDeviceKey } = require('../../../utils/studentDeviceKey');
+            const deviceKey = await getOrCreateDeviceKey();
+            
+            // Get unit and room IDs
+            const unitId = adaptiveConfig.getUnitId(unitCode);
+            const roomId = adaptiveConfig.getRoomId(lectureRoom);
+            
+            if (unitId == null || roomId == null) {
+                console.warn('[Relay] Cannot resolve unitId or roomId');
+                setRegeneratedQrData('');
+                setRelayManualPin('');
+                return;
+            }
+
+            const now = Date.now();
+            const sessionStartSec = Math.floor(sessionStart / 1000);
+            
+            // Build session object
+            const session = {
+                unitId,
+                roomId,
+                sessionStart: sessionStartSec,
+                sessionDuration: 3600, // Default 1 hour
+                sessionNonce,
+            };
+
+            // ===== GENERATE RELAY QR CODE =====
+            const { encodeRelayQR } = require('../../../utils/qrSigning');
+            const relayQR = encodeRelayQR(session, studentSession.studentId, deviceKey, now);
+            
+            setRegeneratedQrData(relayQR);
+            receivedQrDataRef.current = relayQR;
+            
+            // ===== GENERATE RELAY PIN (HMAC-SHA256 bound to device key) =====
+            const pinCounter = deriveAbsoluteCounter(sessionStartSec, PIN_WINDOW_SECONDS, now);
+            const encodedPayload = encodePayload(session);
+            const pin = computeRelayPin(deviceKey, encodedPayload, pinCounter, studentSession.studentId);
+            
+            setRelayManualPin(pin);
+            relayPinRef.current = pin;
+            
+            console.log('[Relay] Generated relay QR and PIN');
+        } catch (err) {
+            console.error('[Relay] Failed to generate relay tokens:', err);
+            setRegeneratedQrData('');
+            setRelayManualPin('');
+        }
+    }, [scannedData]);
 
     // QR rotation timer
     useEffect(() => {
@@ -1711,8 +1989,8 @@ const OfflineMarker = () => {
     const handleManualTokenSubmit = useCallback(async () => {
         if (scannedDataRef.current) { setManualTokenError('Already marked for this session'); return; }
         const normalizedToken = normalizeManualAttendanceTokenInput(manualTokenInput);
-        if (!normalizedToken) {
-            setManualTokenError('Enter the 6-digit PIN');
+        if (normalizedToken.length !== 6) {
+            setManualTokenError('Enter a valid 6-digit PIN');
             return;
         }
 
@@ -1743,32 +2021,46 @@ const OfflineMarker = () => {
             const isGDSession = myGroupNumber != null || hasActiveDelegation;
             const manualSessionDuration = isGDSession ? GD_SESSION_DURATION_MS : SESSION_DURATION_MS;
 
-            // Build synthetic cachedSession — student may not have pre-synced.
-            // Session-active check is best-effort; actual PIN value is verified by backend at sync.
+            const unitCode = manualUnitCode;
+            const lectureRoom = normalizeRoomCode(manualLectureRoomInput);
+
+            const cachedSessionRecord = await findCachedSessionForManualPin({
+                unitCode,
+                lectureRoom,
+                manualSessionDurationMs: manualSessionDuration,
+            });
+            if (!cachedSessionRecord) {
+                const approximateSession = buildApproximateSessionForManualPin({
+                    unitCode,
+                    lectureRoom,
+                    manualSessionDurationMs: manualSessionDuration,
+                });
+                cachedSessionRecord = approximateSession;
+            }
+
             const sessionDurationSec = Math.floor(manualSessionDuration / 1000);
-            const nowS = Math.floor(Date.now() / 1000);
             const cachedSession = {
-                sessionStart: nowS - sessionDurationSec,
-                sessionDuration: sessionDurationSec * 2,
+                sessionStart: Math.floor(cachedSessionRecord.sessionStartMs / 1000),
+                sessionDuration: sessionDurationSec,
             };
 
-            const validation = validateManualAttendanceToken({
-                token: normalizedToken,
+            const validation = validatePINEntry({
+                pin: normalizedToken,
                 cachedSession,
                 atMs: Date.now(),
             });
-            if (!validation.isValid) {
+            if (!validation.valid) {
                 setManualTokenError(
-                    validation.reason === 'format' ? 'Enter a valid 6-digit PIN' : 'Invalid or expired token'
+                    validation.reason === 'invalid_format'
+                        ? 'Enter a valid 6-digit PIN'
+                        : validation.reason === 'no_cached_session'
+                            ? 'No cached session found for this unit and room'
+                            : 'Invalid or expired PIN'
                 );
                 return;
             }
 
-            const unitCode = manualUnitCode;
-            const lectureRoom = manualLectureRoom;
-            // Align to the current session-duration epoch so dedup is stable across
-            // multiple submissions that arrive within the same session window.
-            const sessionStart = Math.floor(nowS / sessionDurationSec) * sessionDurationSec * 1000;
+            const sessionStart = cachedSessionRecord.sessionStartMs;
 
             // Use enhanced enrollment check
             if (!checkEnrollment(unitCode)) {
@@ -1808,7 +2100,8 @@ const OfflineMarker = () => {
                 return;
             }
 
-            setFeedbackMessage('✓ Success! (Manual)');
+            setAttendanceMethod('pin');
+            setFeedbackMessage(isOnline ? '✓ Success! (Manual)' : '✓ Saved locally — will sync when online');
             setScannedData({
                 data: `MANUAL:${normalizedToken}`,
                 details: { unitCode, lectureRoom, sessionStart },
@@ -1846,6 +2139,7 @@ const OfflineMarker = () => {
             // Decode MWQR0x01 signed payload — returns { payload, counter, token } or null
             const decodedQr = decodeQrPayload(rawScan);
             if (!decodedQr || !decodedQr.payload) {
+                handlingScanRef.current = false;
                 return;
             }
 
@@ -1860,8 +2154,7 @@ const OfflineMarker = () => {
             let rawUnitCode = adaptiveConfig.getUnitCodeFromId(unitId);
             let rawRoomCode = adaptiveConfig.getRoomCodeFromId(roomId);
             if (!rawUnitCode || !rawRoomCode) {
-                // Kick off a background sync but do NOT await it — releasing handlingScanRef
-                // lets camera events continue to flow during the fetch.
+                handlingScanRef.current = false;
                 getStudentSession().then(s => {
                     if (s?.institutionId && s?.token) {
                         adaptiveConfig.setInstitution(s.institutionId);
@@ -1878,6 +2171,9 @@ const OfflineMarker = () => {
             const sessionStart = sessionStartSec * 1000; // seconds → ms
             const qrSessionDuration = sessionDurationSec * 1000; // seconds → ms
             const now = Date.now();
+            
+            // Cache session info for PIN fallback (non-blocking)
+            cacheDetectedSession({ unitCode, lectureRoom, sessionStart }).catch(() => {});
 
             if (!checkEnrollment(unitCode)) {
                 setFeedbackMessage('Not enrolled');
@@ -1891,9 +2187,10 @@ const OfflineMarker = () => {
                 return;
             }
 
-            if (sessionStart - now > TIMESTAMP_TOLERANCE_MS) {
+            if (sessionStart - now > CLOCK_SKEW_TOLERANCE_MS) {
                 setFeedbackMessage('Session not started');
                 setTimeout(() => setFeedbackMessage(''), 700);
+                handlingScanRef.current = false;
                 return;
             }
 
@@ -1999,7 +2296,8 @@ const OfflineMarker = () => {
                     setTimeout(() => setFeedbackMessage(''), 1200);
                     return;
                 }
-                setFeedbackMessage('✓ Success!');
+                setAttendanceMethod('qr');
+                setFeedbackMessage(isOnline ? '✓ Success!' : '✓ Saved locally — will sync when online');
                 const result = {
                     data: token,
                     details: { unitCode, lectureRoom, sessionStart: confirmedSessionStart },
@@ -2035,6 +2333,7 @@ const OfflineMarker = () => {
         relayPinRef.current = null;             // prevent stale PIN relay across sessions
         receivedSessionNonceRef.current = null; // prevent stale nonce from bleeding into next session
         setScannedData(null);
+        setAttendanceMethod(null);
         setRegeneratedQrData('');
         setRelayManualPin('');
         setFeedbackMessage('');
@@ -2464,14 +2763,26 @@ const OfflineMarker = () => {
                         </PulseView>
                         <Text style={styles.resultTitle}>Attendance Marked!</Text>
                         <Text style={styles.resultDescription}>
-                            {regeneratedQrData
-                                ? "Show this QR to peers who haven't marked yet."
-                                : relayManualPin
-                                    ? "Share this PIN with peers who haven't marked yet."
-                                    : isBluetoothOn
-                                        ? "Broadcasting to peers — stay in the room to help others mark."
-                                        : "Attendance recorded."}
+                            {attendanceMethod === 'pin'
+                                ? receivedSessionNonceRef.current === null
+                                    ? 'Manual PIN saved — relay disabled until session is verified.'
+                                    : 'Manual PIN is ready for peer relay.'
+                                : regeneratedQrData
+                                    ? "Show this QR to peers who haven't marked yet."
+                                    : relayManualPin
+                                        ? "Share this PIN with peers who haven't marked yet."
+                                        : isBluetoothOn
+                                            ? 'Broadcasting to peers — stay in the room to help others mark.'
+                                            : 'Attendance recorded.'}
                         </Text>
+                        {attendanceMethod === 'pin' && receivedSessionNonceRef.current === null ? (
+                            <StatusChip
+                                type="warning"
+                                message="PIN relay pending peer session proof"
+                                icon="time-outline"
+                                styles={styles}
+                            />
+                        ) : null}
 
                         {sessionActive && (
                             <View style={styles.sessionTimer}>

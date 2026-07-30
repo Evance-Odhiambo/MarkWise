@@ -1,5 +1,6 @@
 // src/storage/sqliteStorage.js
 // Async SQLite helpers
+/* global crypto */
 export const runAsync = async (sql, params = []) => {
   const db = await getDatabase();
   if (!db) throw new Error('SQLite database is unavailable');
@@ -318,13 +319,11 @@ const getMemoryAttendanceGoals = (studentKey) => {
 };
 
 const generateDeviceId = () => {
-  const seed = `${Date.now()}-${Math.random()}-${Math.random()}`;
-  let hash = 2166136261;
-  for (let index = 0; index < seed.length; index += 1) {
-    hash ^= seed.charCodeAt(index);
-    hash = Math.imul(hash, 16777619) >>> 0;
-  }
-  return `MWD-${Date.now().toString(36).toUpperCase()}-${hash.toString(36).toUpperCase()}`;
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+  const timestamp = Date.now().toString(36).toUpperCase();
+  return `MWD-${timestamp}-${hex.toUpperCase()}`;
 };
 
 const ensureAttendanceSchema = async () => {

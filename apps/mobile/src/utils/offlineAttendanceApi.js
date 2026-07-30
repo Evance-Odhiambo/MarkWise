@@ -285,6 +285,18 @@ export const syncPendingAttendance = async () => {
       }
     }
 
+    // ── Register device key after first successful attendance sync ────────
+    if (synced > 0 && session?.studentId) {
+      try {
+        const { getOrCreateDeviceKey, registerDeviceKeyWithBackend } = require('./studentDeviceKey');
+        const deviceKey = await getOrCreateDeviceKey();
+        await registerDeviceKeyWithBackend(deviceKey, session.studentId, studentToken, API_BASE_URL);
+      } catch (err) {
+        // Non-critical — device key registration can happen later
+        console.warn('[syncPendingAttendance] Device key registration failed:', err.message);
+      }
+    }
+
     // ── Lecturer offline manual marks ─────────────────────────────────────
     try {
       const { getLecturerSession } = require('./authSession');

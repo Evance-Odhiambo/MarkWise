@@ -14,7 +14,7 @@ import {
   clearTimetableDirty,
 } from '../utils/notificationEventBus';
 
-const POLLING_INTERVAL_MS = 30000;
+const POLLING_INTERVAL_MS = 15000; // Reduced from 30s to 15s for faster updates
 
 export const useStudentTimetableSync = () => {
   const [isLoading, setIsLoading] = useState(true);
@@ -111,6 +111,8 @@ export const useStudentTimetableSync = () => {
         if (!hasCacheRef.current) {
           setError(err?.message || 'Unable to sync timetable from backend.');
         }
+        // Log error but don't block UI if we have cache
+        console.warn('[Timetable Sync]', err?.message || 'Sync error');
       }
     } finally {
       if (mountedRef.current && !silent) setIsLoading(false);

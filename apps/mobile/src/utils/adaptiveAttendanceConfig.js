@@ -441,10 +441,6 @@ class AdaptiveAttendanceConfig {
             console.warn('[AdaptiveConfig] getUnitCodeFromId: No ID provided');
             return null;
         }
-        if (!this.mappings) {
-            console.warn('[AdaptiveConfig] getUnitCodeFromId: No mappings available');
-            return null;
-        }
 
         // Normalize to number
         let num;
@@ -467,13 +463,20 @@ class AdaptiveAttendanceConfig {
 
         // Cache miss — scan maps directly (handles cold cache or unusual mapping shapes).
         for (const k of [paddedKey, 'U' + paddedKey, String(num), 'U' + num]) {
-            const mapping = this.mappings.unitMappings.get(k);
+            const mapping = this.mappings?.unitMappings.get(k);
             if (mapping) {
                 const code = mapping.rawCode || mapping.displayName;
                 if (code) { this.unitIdToCodeCache.set(paddedKey, code); return code; }
             }
-            const rev = this.mappings.reverseUnit.get(k);
+            const rev = this.mappings?.reverseUnit.get(k);
             if (rev) { this.unitIdToCodeCache.set(paddedKey, rev); return rev; }
+        }
+
+        // Offline fallback: use the numeric ID as the code when mappings are missing.
+        // The server will resolve the canonical code on sync.
+        if (!this.mappings) {
+            console.warn(`[AdaptiveConfig] No mappings — falling back to numeric unit ID: ${num}`);
+            return String(num);
         }
 
         console.warn(`[AdaptiveConfig] No unit code found for ID: ${unitId} (num=${num}, key=${paddedKey})`);
@@ -488,10 +491,6 @@ class AdaptiveAttendanceConfig {
     getRoomCodeFromId(roomId) {
         if (roomId === undefined || roomId === null) {
             console.warn('[AdaptiveConfig] getRoomCodeFromId: No ID provided');
-            return null;
-        }
-        if (!this.mappings) {
-            console.warn('[AdaptiveConfig] getRoomCodeFromId: No mappings available');
             return null;
         }
 
@@ -516,13 +515,20 @@ class AdaptiveAttendanceConfig {
 
         // Cache miss — scan maps directly (handles cold cache or unusual mapping shapes).
         for (const k of [paddedKey, 'R' + paddedKey, String(num), 'R' + num]) {
-            const mapping = this.mappings.roomMappings.get(k);
+            const mapping = this.mappings?.roomMappings.get(k);
             if (mapping) {
                 const code = mapping.rawCode || mapping.displayName;
                 if (code) { this.roomIdToCodeCache.set(paddedKey, code); return code; }
             }
-            const rev = this.mappings.reverseRoom.get(k);
+            const rev = this.mappings?.reverseRoom.get(k);
             if (rev) { this.roomIdToCodeCache.set(paddedKey, rev); return rev; }
+        }
+
+        // Offline fallback: use the numeric ID as the room code when mappings are missing.
+        // The server will resolve the canonical room code on sync.
+        if (!this.mappings) {
+            console.warn(`[AdaptiveConfig] No mappings — falling back to numeric room ID: ${num}`);
+            return `ROOM_${num}`;
         }
 
         console.warn(`[AdaptiveConfig] No room code found for ID: ${roomId} (num=${num}, key=${paddedKey})`);

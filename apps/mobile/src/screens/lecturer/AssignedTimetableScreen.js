@@ -25,7 +25,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useColors } from '../../theme';
-
+import { parseRescheduledInfo } from '../../utils/rescheduleInfo';
 
 const LESSON_STATUS_OPTIONS = ['Online', 'Cancelled', 'Confirmed', 'Rescheduled'];
 
@@ -76,8 +76,34 @@ const WEEKLY_STATUSES = new Set(['Cancelled', 'Rescheduled', 'Online']);
 const getEffectiveStatus = (entry) => {
   // Compound state: Rescheduled + sub-status (e.g. Rescheduled + Confirmed).
   // Always treat as 'Rescheduled' so the reschedule block remains visible.
-  if (entry?.rescheduleSubStatus && entry?.rescheduledTo) return 'Rescheduled';
+  const hasRescheduleData = Boolean(
+    entry?.rescheduleSubStatus ||
+    entry?.rescheduledTo ||
+    entry?.rescheduled_to ||
+    entry?.rescheduledVenue ||
+    entry?.rescheduled_venue
+  );
+  if ((entry?.rescheduleSubStatus || entry?.status === 'Rescheduled') && hasRescheduleData) {
+    return 'Rescheduled';
+  }
+
+  const hasLecturerOverride = Boolean(
+    entry?.statusSource === 'lecturer' ||
+    entry?.updatedBy === 'Lecturer' ||
+    entry?.updatedBy === 'lecturer' ||
+    entry?.rescheduleSubStatus ||
+    entry?.pendingReason ||
+    entry?.reason ||
+    entry?.onlineStartTime ||
+    entry?.onlineEndTime ||
+    entry?.meetingLink ||
+    entry?.meetingNote
+  );
+
   const stored = String(entry?.status || 'Pending').trim() || 'Pending';
+  if (!hasLecturerOverride && (stored === 'Confirmed' || stored === 'Cancelled' || stored === 'Online')) {
+    return 'Pending';
+  }
   if (!WEEKLY_STATUSES.has(stored)) return stored;
   const updatedAt = entry?.updatedAt ? new Date(entry.updatedAt) : null;
   if (!updatedAt || Number.isNaN(updatedAt.getTime())) return 'Pending';
@@ -442,6 +468,7 @@ export default function AssignedTimetableScreen() {
         return {
           ...row,
           status: isCompound ? 'Rescheduled' : status,
+          statusSource: 'lecturer',
           rescheduleSubStatus: optimisticSubStatus,
           reason: optimisticReason || null,
           pendingReason: optimisticPendingReason || null,
@@ -489,6 +516,38 @@ export default function AssignedTimetableScreen() {
 
       const result = await updateLecturerTimetableEntryStatus(payload);
 
+      // Always update the local state with the server response to ensure consistency
+      setEntries((previous) =>
+        previous.map((row) => {
+          if (String(row?.id || '').trim() !== entryId) return row;
+          
+          // If server returned updated entry, merge it with current data
+          if (result?.updatedEntry) {
+            const merged = { ...row, ...result.updatedEntry };
+            
+            // Preserve optimistic values if server didn't return them
+            if (status === 'Rescheduled' || isCompound) {
+              if (!merged.rescheduledTo) merged.rescheduledTo = optimisticRescheduledTo;
+              if (merged.reschedulePermanent == null) merged.reschedulePermanent = optimisticReschedulePermanent;
+              if (isCompound) {
+                merged.status = 'Rescheduled';
+                merged.rescheduleSubStatus = optimisticSubStatus;
+              }
+            }
+            
+            // Ensure updatedAt and statusSource are set
+            merged.updatedAt = merged.updatedAt || new Date().toISOString();
+            merged.statusSource = merged.statusSource || 'lecturer';
+            merged.updatedBy = merged.updatedBy || 'Lecturer';
+            
+            return merged;
+          }
+          
+          // If no server response, keep the optimistic update
+          return row;
+        })
+      );
+
       if (status === 'Rescheduled' || isCompound) {
         // Persist locally so the card survives refreshes until the backend stores it
         const updatedCache = {
@@ -507,27 +566,8 @@ export default function AssignedTimetableScreen() {
         rescheduleCacheRef.current = rest;
         saveRescheduleCache(rest);
       }
-
-      if (result?.updatedEntry) {
-        setEntries((previous) =>
-          previous.map((row) => {
-            if (String(row?.id || '').trim() !== entryId) return row;
-            const merged = { ...row, ...result.updatedEntry };
-            // If the server response omits rescheduled fields, preserve the
-            // optimistic values we already set so the card doesn't go blank.
-            if (status === 'Rescheduled' || isCompound) {
-              if (!merged.rescheduledTo) merged.rescheduledTo = optimisticRescheduledTo;
-              if (merged.reschedulePermanent == null) merged.reschedulePermanent = optimisticReschedulePermanent;
-              if (isCompound) {
-                merged.status = 'Rescheduled';
-                merged.rescheduleSubStatus = optimisticSubStatus;
-              }
-            }
-            return merged;
-          })
-        );
-      }
     } catch (error) {
+      // Revert optimistic update on error
       setEntries((previous) =>
         previous.map((row) => (String(row?.id || '').trim() === entryId ? entry : row))
       );
@@ -794,6 +834,10 @@ export default function AssignedTimetableScreen() {
           }),
         ),
       );
+
+      if (newTypeCode === 'GD') {
+        handleOpenDelegate(entry);
+      }
     } catch (error) {
       // Roll back all affected entries
       setEntries((prev) =>
@@ -1726,10 +1770,7 @@ export default function AssignedTimetableScreen() {
                       )}
                     </View>
                     {mergedStatus === 'Rescheduled' && (() => {
-                      const raw = String(entry?.rescheduledTo || '').trim();
-                      const dotIdx = raw.indexOf('|');
-                      const newTime = dotIdx !== -1 ? raw.slice(0, dotIdx).trim() : raw;
-                      const newRoom = dotIdx !== -1 ? raw.slice(dotIdx + 1).trim() : '';
+                      const { time: newTime, roomCode: newRoom } = parseRescheduledInfo(entry?.rescheduledTo, entry?.rescheduledVenue);
                       return (
                         <View style={S.rescheduleInfoBlock}>
                           <View style={S.rescheduleInfoHeader}>
@@ -1803,7 +1844,7 @@ export default function AssignedTimetableScreen() {
                               disabled={anyMergedUpdating}
                               activeOpacity={0.8}
                             >
-                              <Text style={S.delegateBtnText}>Delegate to Groups</Text>
+                              <Text style={S.delegateBtnText}>Delegate Attendance</Text>
                             </TouchableOpacity>
                           )}
                         </>
@@ -1887,7 +1928,7 @@ export default function AssignedTimetableScreen() {
                       disabled={isEntryUpdating}
                       activeOpacity={0.8}
                     >
-                      <Text style={S.delegateBtnText}>  Delegate to Groups</Text>
+                      <Text style={S.delegateBtnText}>  Delegate Attendance</Text>
                     </TouchableOpacity>
                   )}
                   {entry.isExtraSession && !!entry.date && (
@@ -1896,10 +1937,7 @@ export default function AssignedTimetableScreen() {
                   <Text style={S.metaText}>{timeDisplay}</Text>
                   {!!venue && <Text style={S.metaText}>Venue: {venue}</Text>}
                   {!entry.isExtraSession && status === 'Rescheduled' && (() => {
-                    const raw = String(entry?.rescheduledTo || '').trim();
-                    const dotIdx = raw.indexOf('-');
-                    const newTime = dotIdx !== -1 ? raw.slice(0, dotIdx).trim() : raw;
-                    const newRoom = dotIdx !== -1 ? raw.slice(dotIdx + 1).trim() : '';
+                    const { time: newTime, roomCode: newRoom } = parseRescheduledInfo(entry?.rescheduledTo, entry?.rescheduledVenue);
                     return (
                       <View style={S.rescheduleInfoBlock}>
                         {/* Header */}
@@ -1931,7 +1969,7 @@ export default function AssignedTimetableScreen() {
                           <View style={S.rescheduleNowCol}>
                             <Text style={S.rescheduleNowLabel}>NOW</Text>
                             <Text style={S.rescheduleNowTime} numberOfLines={1}>{newTime || ''}</Text>
-                            <Text style={S.rescheduleNowRoom} numberOfLines={1}>{newRoom || entry?.rescheduledVenue || ''}</Text>
+                            <Text style={S.rescheduleNowRoom} numberOfLines={1}>{newRoom || ''}</Text>
                           </View>
                         </View>
                       </View>
