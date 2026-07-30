@@ -80,20 +80,21 @@ export const lightTheme = {
   dark: false,
 
   colors: {
-    // Backgrounds — slate 50 page, white cards
+    // Warm off-white background (#FDFBF7) — reduces blue-light glare and eye strain,
+    // promoting sustained focus and comfort during long reading sessions.
     background: {
-      primary:   palette.slate50,   // #F8FAFC  page bg
-      secondary: palette.white,     // #FFFFFF  elevated surfaces
-      tertiary:  palette.slate100,  // #F1F5F9  subtle sections
-      card:      palette.white,
-      dark:      palette.slate900,  // kept for compat (camera overlays etc.)
+      primary:   palette.warm50,     // #FDFBF7  warm paper-white page bg
+      secondary: palette.warm100,    // #F7F5F0  elevated warm surfaces
+      tertiary:  palette.slate100,   // #F1F5F9  subtle sections
+      card:      palette.white,      // #FFFFFF  crisp card contrast
+      dark:      palette.slate900,   // kept for camera-overlay compat
     },
 
-    // Surface elevations
+    // Surface elevations — warm-tinted for comfort
     surface: {
       primary:   palette.white,
-      secondary: palette.slate50,
-      tertiary:  palette.slate100,
+      secondary: palette.warm50,
+      tertiary:  palette.warm100,
       elevated:  palette.white,
       card:      palette.white,
     },
@@ -152,7 +153,7 @@ export const darkTheme = {
 
   colors: {
     background: {
-      primary:   palette.slate900,  // #0F172A
+      primary:   palette.warm900,   // #1C1C1E  warm near-black (softer than slate900)
       secondary: palette.slate800,  // #1E293B
       tertiary:  palette.slate700,  // #334155
       card:      palette.slate800,

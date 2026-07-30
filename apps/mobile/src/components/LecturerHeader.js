@@ -12,21 +12,21 @@ import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import sqliteStorage from '../storage/sqliteStorage';
 import { getLecturerSession } from '../utils/authSession';
-import colors from '../theme/colors';
+import { useColors } from '../theme';
 
 const STATUSBAR_HEIGHT = Platform.OS === 'ios' ? 44 : (StatusBar.currentHeight ?? 24);
-const HEADER_TOTAL_HEIGHT = STATUSBAR_HEIGHT + 72;
+const HEADER_TOTAL_HEIGHT = STATUSBAR_HEIGHT + 80;
 
-// Design constants
 const DESIGN = {
   headerHeight: HEADER_TOTAL_HEIGHT,
-  avatarSize: 44,
-  iconSize: 20,
+  avatarSize: 48,
+  iconSize: 22,
   badgeSize: 18,
   borderRadius: {
-    button: 14,
-    avatar: 22,
+    button: 16,
+    avatar: 24,
     badge: 9,
+    card: 20,
   },
   spacing: {
     xs: 4,
@@ -34,90 +34,92 @@ const DESIGN = {
     md: 12,
     lg: 16,
     xl: 20,
+    xxl: 24,
   },
 };
 
-// Gradient colors for header — driven by the primary brand token
-const GRADIENT_COLORS = {
-  start:        colors.primary.gradient[0],  // indigo-600
-  end:          colors.primary.gradient[1],  // purple-600
-  overlayStart: 'rgba(255,255,255,0.08)',
-  overlayEnd:   'rgba(255,255,255,0)',
-};
-
-// Greeting configuration
 const GREETINGS = [
-  { start: 5, end: 12, text: 'Good morning', icon: 'weather-sunny', iconColor: '#FBBF24' },
-  { start: 12, end: 17, text: 'Good afternoon', icon: 'white-balance-sunny', iconColor: '#F97316' },
-  { start: 17, end: 21, text: 'Good evening', icon: 'weather-sunset-down', iconColor: '#FB923C' },
-  { start: 21, end: 5, text: 'Good night', icon: 'weather-night', iconColor: '#A5B4FC' },
+  { start: 5, end: 12, text: 'Good morning', icon: 'weather-sunny', color: '#FBBF24' },
+  { start: 12, end: 17, text: 'Good afternoon', icon: 'white-balance-sunny', color: '#F97316' },
+  { start: 17, end: 21, text: 'Good evening', icon: 'weather-sunset-down', color: '#FB923C' },
+  { start: 21, end: 5, text: 'Good night', icon: 'weather-night', color: '#A5B4FC' },
 ];
 
-function getGreeting(hour) {
-  const greeting = GREETINGS.find(g => hour >= g.start && hour < g.end) || GREETINGS[3];
-  return greeting;
-}
+const getGreeting = (hour) => {
+  return GREETINGS.find(g => hour >= g.start && hour < g.end) || GREETINGS[3];
+};
 
-function formatDate(date) {
+const formatDate = (date) => {
   const day = date.toLocaleDateString('en-GB', { weekday: 'long' });
   const month = date.toLocaleDateString('en-GB', { month: 'short' });
   const dayNum = date.getDate();
   return `${day}, ${month} ${dayNum}`;
-}
+};
 
-function useClock() {
+const useClock = () => {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60000);
     return () => clearInterval(id);
   }, []);
   return now;
-}
+};
 
-// Extracted subcomponents for better organization
-const HeaderButton = ({ onPress, icon, badgeCount, badgeScale }) => (
+const HeaderButton = ({ onPress, icon, badgeCount, badgeScale, colors }) => (
   <TouchableOpacity
-    style={styles.headerButton}
+    style={[styles.headerButton, { backgroundColor: colors.primary.soft }]}
     onPress={onPress}
     activeOpacity={0.7}
     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
   >
-    <Icon name={icon} size={DESIGN.iconSize} color="#FFFFFF" />
+    <Icon name={icon} size={DESIGN.iconSize} color={colors.primary.main} />
     {badgeCount > 0 && (
-      <Animated.View style={[styles.badge, { transform: [{ scale: badgeScale }] }]}>
+      <Animated.View style={[styles.badge, { transform: [{ scale: badgeScale }], backgroundColor: colors.danger.main }]}>
         <Text style={styles.badgeText}>{badgeCount > 9 ? '9+' : badgeCount}</Text>
       </Animated.View>
     )}
   </TouchableOpacity>
 );
 
-const LecturerAvatar = ({ name, onPress }) => {
+const LecturerAvatar = ({ name, onPress, colors }) => {
   const initial = name ? name.charAt(0).toUpperCase() : '?';
   return (
-    <TouchableOpacity style={styles.avatar} onPress={onPress} activeOpacity={0.7}>
-      <Text style={styles.avatarText}>{initial}</Text>
+    <TouchableOpacity 
+      style={[styles.avatar, { backgroundColor: colors.primary.soft, borderColor: colors.primary.main + '30' }]} 
+      onPress={onPress} 
+      activeOpacity={0.7}
+    >
+      <Text style={[styles.avatarText, { color: colors.primary.main }]}>{initial}</Text>
     </TouchableOpacity>
   );
 };
 
 export default function LecturerHeader({ navigation }) {
+  const colors = useColors();
   const [unreadCount, setUnreadCount] = useState(0);
   const [fullName, setFullName] = useState('');
   const [isLoadingName, setIsLoadingName] = useState(true);
   
   const badgeScale = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(20)).current;
   const prevCountRef = useRef(0);
   const now = useClock();
 
-  // Animate header on mount
   useEffect(() => {
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 400,
-      useNativeDriver: true,
-    }).start();
-  }, [fadeAnim]);
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 600,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 600,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [fadeAnim, slideAnim]);
 
   const refreshBadge = useCallback(async () => {
     try {
@@ -132,7 +134,6 @@ export default function LecturerHeader({ navigation }) {
     return () => unsub?.();
   }, [navigation, refreshBadge]);
 
-  // Fetch lecturer name
   useEffect(() => {
     getLecturerSession()
       .then(s => {
@@ -143,7 +144,6 @@ export default function LecturerHeader({ navigation }) {
       .catch(() => setIsLoadingName(false));
   }, []);
 
-  // Badge animation
   useEffect(() => {
     if (unreadCount > 0 && prevCountRef.current === 0) {
       Animated.spring(badgeScale, {
@@ -164,60 +164,69 @@ export default function LecturerHeader({ navigation }) {
 
   const greeting = getGreeting(now.getHours());
   const formattedDate = useMemo(() => formatDate(now), [now]);
-  const displayName = isLoadingName ? 'Loading...' : (fullName || 'Lecturer');
+  const displayName = isLoadingName ? 'Lecturer' : (fullName || 'Lecturer');
 
   return (
     <Animated.View style={[styles.root, { opacity: fadeAnim }]}>
-          <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
-          
-          <LinearGradient
-            colors={[GRADIENT_COLORS.start, GRADIENT_COLORS.end]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.gradient}
-          >
-            {/* Decorative elements */}
-            <View style={styles.decorOrb1} />
-            <View style={styles.decorOrb2} />
-            <View style={styles.decorLine} />
+      <StatusBar 
+        barStyle="light-content" 
+        backgroundColor="transparent" 
+        translucent 
+      />
+      
+      <LinearGradient
+        colors={[colors.primary.dark, colors.primary.main]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.gradient}
+      >
+        {/* Subtle decorative orbs */}
+        <View style={[styles.decorOrb1, { backgroundColor: colors.primary.light + '15' }]} />
+        <View style={[styles.decorOrb2, { backgroundColor: colors.primary.light + '10' }]} />
+        
+        <View style={styles.content}>
+          {/* Left: Menu + Avatar */}
+          <View style={styles.leftSection}>
+            <TouchableOpacity
+              style={styles.menuButton}
+              onPress={() => navigation.openDrawer()}
+              activeOpacity={0.7}
+            >
+              <Icon name="menu" size={DESIGN.iconSize} color="#FFFFFF" />
+            </TouchableOpacity>
+            
+            <LecturerAvatar name={fullName} onPress={() => navigation.navigate('Profile')} colors={colors} />
+          </View>
 
-            <View style={styles.content}>
-              {/* Left: Menu + Avatar */}
-              <View style={styles.leftSection}>
-                <TouchableOpacity
-                  style={styles.menuButton}
-                  onPress={() => navigation.openDrawer()}
-                  activeOpacity={0.7}
-                >
-                  <Icon name="menu" size={DESIGN.iconSize} color="#FFFFFF" />
-                </TouchableOpacity>
-                
-                <LecturerAvatar name={fullName} onPress={() => navigation.navigate('Profile')} />
+          {/* Center: Greeting + Date */}
+          <View style={styles.centerSection}>
+            <View style={styles.greetingRow}>
+              <View style={[styles.greetingIconWrap, { backgroundColor: greeting.color + '25' }]}>
+                <Icon name={greeting.icon} size={16} color={greeting.color} />
               </View>
-
-              {/* Center: Greeting + Date */}
-              <View style={styles.centerSection}>
-                <View style={styles.greetingRow}>
-                  <Icon name={greeting.icon} size={14} color={greeting.iconColor} />
-                  <Text style={styles.greetingText} numberOfLines={1}>
-                    {greeting.text}, {displayName}
-                  </Text>
-                </View>
-                <Text style={styles.dateText}>{formattedDate}</Text>
-              </View>
-
-              {/* Right: Notifications */}
-              <HeaderButton
-                onPress={() => navigation.navigate('Notifications')}
-                icon="bell-outline"
-                badgeCount={unreadCount}
-                badgeScale={badgeScale}
-              />
+              <Text style={styles.greetingText} numberOfLines={1}>
+                {greeting.text}
+              </Text>
             </View>
+            <Text style={styles.nameText} numberOfLines={1}>
+              {displayName}
+            </Text>
+            <Text style={styles.dateText}>{formattedDate}</Text>
+          </View>
 
-            {/* Subtle bottom accent */}
-            <View style={styles.bottomAccent} />
-          </LinearGradient>
+          {/* Right: Notifications */}
+          <HeaderButton
+            onPress={() => navigation.navigate('Notifications')}
+            icon="bell-outline"
+            badgeCount={unreadCount}
+            badgeScale={badgeScale}
+            colors={colors}
+          />
+        </View>
+
+        {/* Subtle bottom separator */}
+        <View style={styles.bottomSeparator} />
+      </LinearGradient>
     </Animated.View>
   );
 }
@@ -226,8 +235,8 @@ const styles = StyleSheet.create({
   root: {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
     elevation: 8,
     zIndex: 10,
   },
@@ -241,37 +250,27 @@ const styles = StyleSheet.create({
   // Decorative elements
   decorOrb1: {
     position: 'absolute',
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    top: -80,
-    right: -60,
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    top: -100,
+    right: -70,
   },
   decorOrb2: {
     position: 'absolute',
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    bottom: -40,
-    left: -30,
-  },
-  decorLine: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    bottom: -50,
+    left: -40,
   },
   
   content: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: DESIGN.spacing.lg,
-    paddingTop: DESIGN.spacing.sm,
-    paddingBottom: DESIGN.spacing.sm,
+    paddingTop: DESIGN.spacing.md,
+    paddingBottom: DESIGN.spacing.md,
     gap: DESIGN.spacing.md,
   },
   
@@ -282,10 +281,10 @@ const styles = StyleSheet.create({
   },
   
   menuButton: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     borderRadius: DESIGN.borderRadius.button,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.15)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -294,44 +293,61 @@ const styles = StyleSheet.create({
     width: DESIGN.avatarSize,
     height: DESIGN.avatarSize,
     borderRadius: DESIGN.borderRadius.avatar,
-    backgroundColor: 'rgba(255,255,255,0.15)',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.25)',
+    borderWidth: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   avatarText: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '700',
-    color: '#FFFFFF',
   },
   
   centerSection: {
     flex: 1,
+    gap: 2,
   },
   greetingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
+  },
+  greetingIconWrap: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   greetingText: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: 'rgba(255,255,255,0.9)',
     letterSpacing: 0.2,
   },
+  nameText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: -0.2,
+    marginTop: 2,
+  },
   dateText: {
-    fontSize: 11,
-    color: 'rgba(255,255,255,0.5)',
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.6)',
     marginTop: 2,
     letterSpacing: 0.3,
+    fontWeight: '500',
   },
   
   headerButton: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     borderRadius: DESIGN.borderRadius.button,
-    backgroundColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
@@ -344,12 +360,11 @@ const styles = StyleSheet.create({
     minWidth: DESIGN.badgeSize,
     height: DESIGN.badgeSize,
     borderRadius: DESIGN.borderRadius.badge,
-    backgroundColor: colors.danger.main,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 3,
-    borderWidth: 1.5,
-    borderColor: '#059669',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
   },
   badgeText: {
     fontSize: 9,
@@ -358,13 +373,9 @@ const styles = StyleSheet.create({
     lineHeight: 11,
   },
   
-  bottomAccent: {
-    position: 'absolute',
-    bottom: 0,
-    left: DESIGN.spacing.lg,
-    right: DESIGN.spacing.lg,
-    height: 2,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    borderRadius: 1,
+  bottomSeparator: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    marginHorizontal: DESIGN.spacing.lg,
   },
 });

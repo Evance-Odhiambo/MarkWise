@@ -56,6 +56,13 @@ const palette = {
   slate800: '#1E293B',
   slate900: '#0F172A',
 
+  // ── Learning-optimized warm neutrals ─────────────────────────────────────
+  // Warm off-white reduces blue-light glare and eye strain during prolonged reading.
+  // Chosen for primary app backgrounds in light mode.
+  warm50:   '#FDFBF7',   // warm paper-white — primary page background
+  warm100:  '#F7F5F0',   // warm light gray — secondary surfaces
+  warm900:  '#1C1C1E',   // warm near-black — dark mode page background (softer than slate900)
+
   // ── Premium / badge tiers ────────────────────────────────────────────────
   gold:     '#FFD700',
   silver:   '#C0C0C0',

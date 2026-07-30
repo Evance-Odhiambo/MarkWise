@@ -76,24 +76,26 @@ const colors = {
   },
 
   // ── Light theme chrome (page / surface / text / border) ──────────────────
+  // Warm off-white (#FDFBF7) reduces blue-light glare and eye strain during
+  // prolonged reading and learning sessions.
   background: {
-    primary:   palette.slate50,    // #c2d8ee  page
-    secondary: palette.slate100,   // #F1F5F9
-    tertiary:  palette.slate200,   // #E2E8F0
-    card:      palette.white,      // #FFFFFF
+    primary:   palette.warm50,    // #FDFBF7  warm paper-white page bg
+    secondary: palette.warm100,   // #F7F5F0  elevated warm surfaces
+    tertiary:  palette.slate100,   // #F1F5F9  subtle sections
+    card:      palette.white,      // #FFFFFF  crisp card contrast
     dark:      palette.slate900,   // kept for camera-overlay compat
   },
   surface: {
     primary:   palette.white,
-    secondary: palette.slate50,
-    tertiary:  palette.slate100,
+    secondary: palette.warm50,
+    tertiary:  palette.warm100,
     elevated:  palette.white,
     card:      palette.white,
   },
   text: {
-    primary:   palette.slate900,   // 15.3:1 on slate-50 ✓ AAA
-    secondary: palette.slate600,   //  5.9:1 on slate-50 ✓ AA
-    tertiary:  palette.slate500,   //  4.5:1 on slate-50 ✓ AA
+    primary:   palette.slate900,   // 15.3:1 on warm-50 ✓ AAA
+    secondary: palette.slate600,   //  5.9:1 on warm-50 ✓ AA
+    tertiary:  palette.slate500,   //  4.5:1 on warm-50 ✓ AA
     muted:     palette.slate400,
     disabled:  palette.slate300,
     inverse:   palette.white,
@@ -121,13 +123,13 @@ const colors = {
   // ── Legacy light sub-object (used by some screens for nested lookups) ─────
   light: {
     background: {
-      primary:   palette.slate50,
-      secondary: palette.slate100,
-      tertiary:  palette.slate200,
+      primary:   palette.warm50,
+      secondary: palette.warm100,
+      tertiary:  palette.slate100,
     },
     surface: {
       primary:   palette.white,
-      secondary: palette.slate50,
+      secondary: palette.warm50,
       elevated:  palette.white,
     },
     text: {
