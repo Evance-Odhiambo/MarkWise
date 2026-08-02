@@ -11,6 +11,7 @@ import { verifyStudentAccessToken } from '@/lib/studentAuthJwt';
 export const runtime = 'nodejs';
 
 const GD_SESSION_DURATION_MS = 600_000; // 10 minutes
+const MAX_DELEGATION_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -99,10 +100,18 @@ export async function POST(
   const isLocalToken = sessionToken.startsWith('LOCAL-');
 
   if (isLocalToken) {
+    const delegationWindowMs = Number(delegation.validUntil) - Number(delegation.validFrom);
+    if (delegationWindowMs > MAX_DELEGATION_WINDOW_MS) {
+      return NextResponse.json(
+        { message: "Delegation window exceeds maximum allowed duration" },
+        { status: 400, headers: corsHeaders },
+      );
+    }
+
     // Verify format: LOCAL-<delegationId>-<leaderStudentId>
     if (sessionToken !== `LOCAL-${id}-${leaderId}`) {
       return NextResponse.json(
-        { message: 'Invalid LOCAL session token' },
+        { message: "Invalid LOCAL session token" },
         { status: 400, headers: corsHeaders },
       );
     }
@@ -111,7 +120,7 @@ export async function POST(
     const validUntilMs = Number(delegation.validUntil);
     if (markedAt < validFromMs || markedAt > validUntilMs) {
       return NextResponse.json(
-        { message: 'markedAt is outside the delegation validity window' },
+        { message: "markedAt is outside the delegation validity window" },
         { status: 400, headers: corsHeaders },
       );
     }
@@ -133,25 +142,25 @@ export async function POST(
     // authoritative identity proof.
     if (!delegation.sessionToken) {
       return NextResponse.json(
-        { message: 'Session has not been started yet — call /start first' },
+        { message: "Session has not been started yet — call /start first" },
         { status: 400, headers: corsHeaders },
       );
     }
     if (delegation.sessionToken !== sessionToken) {
-      return NextResponse.json({ message: 'Invalid session token' }, { status: 400, headers: corsHeaders });
+      return NextResponse.json({ message: "Invalid session token" }, { status: 400, headers: corsHeaders });
     }
     // Validate markedAt against the actual session start (client-reported time
     // must correspond to the live session window).
     if (!delegation.startedAt) {
       return NextResponse.json(
-        { message: 'Session start time not recorded' },
+        { message: "Session start time not recorded" },
         { status: 400, headers: corsHeaders },
       );
     }
     const sessionStartMs = delegation.startedAt.getTime();
     if (markedAt < sessionStartMs || markedAt > sessionStartMs + GD_SESSION_DURATION_MS) {
       return NextResponse.json(
-        { message: 'markedAt is outside the active session window (10 minutes from session start)' },
+        { message: "markedAt is outside the active session window (10 minutes from session start)" },
         { status: 400, headers: corsHeaders },
       );
     }

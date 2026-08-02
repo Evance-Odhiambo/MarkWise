@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { verifyStudentToken } from "@/lib/auth";
+import { verifyStudentAccessToken } from "@/lib/studentAuthJwt";
 import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
@@ -18,8 +18,12 @@ interface RegisterDeviceBody {
 
 export async function POST(req: NextRequest) {
   try {
-    // Verify student authentication
-    const tokenPayload = await verifyStudentToken(req);
+    const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+    if (!token) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const tokenPayload = verifyStudentAccessToken(token);
     if (!tokenPayload) {
       return NextResponse.json(
         { error: "Unauthorized" },

@@ -11,6 +11,7 @@ const corsHeaders = {
 
 // Max 3 attempts per (deviceId, sessionId) within 10 minutes
 const submitLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 3 });
+const studentLimiter = rateLimit({ windowMs: 60 * 1000, max: 5 });
 
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: corsHeaders });
@@ -52,7 +53,7 @@ export async function POST(
 
   const { id: sessionId } = await params;
 
-  // --- Session check (step 2) ---
+  // ── Session check (step 2) ────────────────────────────────────────────────
   // Sweep expired sessions first so the status field is consistent
   await prisma.onlineAttendanceSession.updateMany({
     where: { status: "active", expiresAt: { lte: new Date() } },
@@ -64,15 +65,16 @@ export async function POST(
     select: { id: true, status: true, expiresAt: true, unitCode: true, createdAt: true },
   });
 
-  if (!session) {
-    return NextResponse.json({ message: "Session not found" }, { status: 404, headers: corsHeaders });
+  if (!session || session.status !== "active" || session.expiresAt <= new Date()) {
+    return NextResponse.json({ message: "Session has ended" }, { status: 410, headers: corsHeaders });
   }
 
-  const now = new Date();
-  if (session.status !== "active" || session.expiresAt <= now) {
+  // ── Global student rate limit ─────────────────────────────────────────────
+  const { allowed: studentAllowed } = await studentLimiter(`student:${studentId}`);
+  if (!studentAllowed) {
     return NextResponse.json(
-      { message: "Session has ended" },
-      { status: 410, headers: corsHeaders }
+      { message: "Too many attempts. Try again later." },
+      { status: 429, headers: corsHeaders }
     );
   }
 

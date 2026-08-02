@@ -34,8 +34,10 @@ import themeColors from '../../../theme/colors';
 
 const SESS_BASE = `${API_BASE_URL}/api/attendance/sessions`;
 
-// Polling interval for fetching attendees (5 seconds)
 const POLL_INTERVAL_MS = 5000;
+const POLL_BACKOFF_MAX_MS = 30000;
+const POLL_BACKOFF_STEP_MS = 5000;
+const POLL_SUCCESS_RESET_AFTER_MS = 60000;
 
 const colors = {
     primary:    themeColors.primary,
@@ -125,7 +127,10 @@ export default function OnlineTaker() {
     const countdownTimer = useRef(null);
     const sessionEndTime = useRef(null);
     const isMounted = useRef(true);
-    const isFetchingAttendeesRef = useRef(false); // prevents overlapping poll requests
+    const isFetchingAttendeesRef = useRef(false);
+    const pollFailureCount = useRef(0);
+    const lastPollSuccessAt = useRef(Date.now());
+    const currentPollInterval = useRef(POLL_INTERVAL_MS);
 
     // Cleanup on unmount
     useEffect(() => {
@@ -196,13 +201,47 @@ export default function OnlineTaker() {
             const res = await fetch(`${SESS_BASE}/${sid}/attendees`, {
                 headers: { Authorization: `Bearer ${session?.token}` },
             });
-            if (!res.ok) return;
-            const data = await res.json();
-            if (isMounted.current) {
-                setAttendees(Array.isArray(data) ? data : (data?.attendees ?? []));
+            if (res.ok) {
+                const data = await res.json();
+                if (isMounted.current) {
+                    setAttendees(Array.isArray(data) ? data : (data?.attendees ?? []));
+                }
+                // Back off on transient success after repeated failures
+                const now = Date.now();
+                if (pollFailureCount.current > 0 && now - lastPollSuccessAt.current > POLL_SUCCESS_RESET_AFTER_MS) {
+                    pollFailureCount.current = 0;
+                }
+                lastPollSuccessAt.current = now;
+                currentPollInterval.current = POLL_INTERVAL_MS;
+                // Restart timer with fresh interval so we don't drift after a backoff
+                clearInterval(pollTimer.current);
+                pollTimer.current = setInterval(() => fetchAttendees(sid), currentPollInterval.current);
+            } else if (res.status === 404) {
+                // Session not found yet — keep trying at base interval
+                pollFailureCount.current = 0;
+                currentPollInterval.current = POLL_INTERVAL_MS;
+            } else {
+                // Transient error — back off
+                pollFailureCount.current += 1;
+                const backoff = Math.min(
+                    POLL_INTERVAL_MS + pollFailureCount.current * POLL_BACKOFF_STEP_MS,
+                    POLL_BACKOFF_MAX_MS
+                );
+                currentPollInterval.current = backoff;
+                clearInterval(pollTimer.current);
+                pollTimer.current = setInterval(() => fetchAttendees(sid), currentPollInterval.current);
+                console.warn(`[OnlineTaker] attendees poll failed (${res.status}); backing off to ${backoff}ms`);
             }
         } catch (err) {
-            console.warn('[OnlineTaker] Poll error:', err.message);
+            pollFailureCount.current += 1;
+            const backoff = Math.min(
+                POLL_INTERVAL_MS + pollFailureCount.current * POLL_BACKOFF_STEP_MS,
+                POLL_BACKOFF_MAX_MS
+            );
+            currentPollInterval.current = backoff;
+            clearInterval(pollTimer.current);
+            pollTimer.current = setInterval(() => fetchAttendees(sid), currentPollInterval.current);
+            console.warn(`[OnlineTaker] attendees poll error: ${err.message}; backing off to ${backoff}ms`);
         } finally {
             isFetchingAttendeesRef.current = false;
         }
@@ -215,7 +254,6 @@ export default function OnlineTaker() {
     const startPolling = useCallback((sid) => {
         clearInterval(pollTimer.current);
         fetchAttendees(sid);
-        pollTimer.current = setInterval(() => fetchAttendees(sid), POLL_INTERVAL_MS);
     }, [fetchAttendees]);
 
     /**
@@ -304,7 +342,9 @@ export default function OnlineTaker() {
                 lectureRoom: 'ONLINE',
                 sessionStart: sessionCreatedAt,
                 createdAt: sessionCreatedAt,
-            }).catch(() => {});
+            }).catch((err) => {
+                console.warn('[OnlineTaker] conducted-session sync failed:', err);
+            });
         } catch (err) {
             Alert.alert('Failed to start session', err.message);
         } finally {

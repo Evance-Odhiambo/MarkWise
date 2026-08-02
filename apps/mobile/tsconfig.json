@@ -4,7 +4,13 @@
     "allowJs": true,
     "checkJs": false
   },
-  "include": ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx"],
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.js",
+    "**/*.jsx",
+    "nativewind-env.d.ts"
+  ],
   "exclude": [
     "**/node_modules",
     "**/Pods",

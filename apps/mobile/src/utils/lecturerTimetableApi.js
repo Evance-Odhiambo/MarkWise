@@ -28,8 +28,10 @@ const readTimetableCache = async () => {
   try {
     const raw = await AsyncStorage.getItem(TIMETABLE_CACHE_KEY);
     return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
+  } catch { return null; };
 };
+
+export const readLecturerTimetableCache = readTimetableCache;
 
 const writeTimetableCache = async (entries) => {
   try {
@@ -652,4 +654,60 @@ export const unmergeLessons = async ({ token, mergedSessionId, unitCode }) => {
     throw new Error(resolveErrorMessage(payload, `Unmerge failed (${res.status})`));
   }
   return payload;
+};
+
+const ANALYTICS_CACHE_KEY = '@markwise_lecturer_analytics_cache';
+
+export const fetchLecturerAnalytics = async (accessToken) => {
+  const token = String(accessToken || '').trim();
+  if (!token) {
+    throw new Error('Missing lecturer access token');
+  }
+
+  const baseUrl = resolveApiBaseUrl();
+  const response = await fetch(`${baseUrl}/api/lecturer/analytics`, {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const payload = await parseResponsePayload(response);
+  if (!response.ok) {
+    throw new Error(resolveErrorMessage(payload, `Failed to fetch analytics: ${response.status}`));
+  }
+
+  const raw = payload?.units ?? payload?.data?.units ?? payload?.data ?? payload?.analytics ?? payload;
+  const list = Array.isArray(raw) ? raw : [];
+
+  const safeNum = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+
+  return list.map((u) => {
+    const unitCode = String(u.unitCode ?? u.unit_code ?? u.code ?? u.courseCode ?? '').trim();
+    const unitName = String(u.unitName ?? u.unit_name ?? u.name ?? u.title ?? u.courseName ?? '').trim();
+    let pct = safeNum(u.attendancePercent ?? u.attendance_percent ?? u.attendanceRate ?? u.rate ?? u.percentage ?? u.percent ?? 0);
+    if (pct > 0 && pct <= 1) pct = pct * 100;
+    const attendancePercent = Number.isFinite(pct) ? Math.min(100, Math.round(pct)) : 0;
+    const conductedSessions = safeNum(u.conductedSessions ?? u.conducted_sessions ?? u.sessionCount ?? u.totalSessions ?? 0);
+    const enrolledStudents = safeNum(u.enrolledStudents ?? u.enrolled_students ?? u.studentCount ?? 0);
+    return { unitCode, unitName, attendancePercent, conductedSessions, enrolledStudents };
+  });
+};
+
+export const readLecturerAnalyticsCache = async () => {
+  try {
+    const raw = await AsyncStorage.getItem(ANALYTICS_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+export const writeLecturerAnalyticsCache = async (units) => {
+  try {
+    await AsyncStorage.setItem(ANALYTICS_CACHE_KEY, JSON.stringify({ units, timestamp: Date.now() }));
+  } catch {
+    // non-critical
+  }
 };

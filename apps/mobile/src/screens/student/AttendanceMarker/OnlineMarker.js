@@ -10,15 +10,16 @@ import {
     Animated,
     BackHandler,
     Platform,
+    AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { getStudentSession } from '../../../utils/authSession';
-import { fetchOnlineSessionInfo, submitOnlineAttendance } from '../../../utils/onlineAttendanceApi';
-import DeviceInfo from 'react-native-device-info';
+import { fetchOnlineSessionInfo, submitOnlineAttendance, queueOnlineSubmission, syncPendingOnlineSubmissions } from '../../../utils/onlineAttendanceApi';
 import sqliteStorage from '../../../storage/sqliteStorage';
+import useSyncOnReconnect from '../../../hooks/useSyncOnReconnect';
 import useResponsive from '../../../hooks/useResponsive';
 import themeColors from '../../../theme/colors';
 
@@ -50,12 +51,14 @@ export default function OnlineMarker() {
 
     const isMounted    = useRef(true);
     const dismissTimer = useRef(null);
+    const queueTimer   = useRef(null);
 
     useEffect(() => {
         isMounted.current = true;
         return () => {
             isMounted.current = false;
             clearTimeout(dismissTimer.current);
+            clearTimeout(queueTimer.current);
         };
     }, []);
 
@@ -134,17 +137,19 @@ export default function OnlineMarker() {
                 if (!isMounted.current) return;
                 // Save a local record so ProgressScreen / history includes this session
                 try {
-                    const deviceId = await DeviceInfo.getUniqueId();
+                    const deviceId = await sqliteStorage.getOrCreateAttendanceDeviceId?.();
                     await sqliteStorage.addAttendanceRecord({
                         unitCode: info.unitCode,
                         lectureRoom: 'ONLINE',
                         sessionStart: Date.now(),
                         scannedAt: Date.now(),
                         rawPayload: JSON.stringify({ type: 'online', sessionId }),
-                        deviceId,
+                        deviceId: deviceId || '',
                         synced: 1,
                     });
                 } catch (_) { /* local save is non-critical */ }
+                // Drain any previously queued attempts now that we are online
+                drainQueue();
                 setPhase('success');
                 popIn();
                 startAutoDismiss();
@@ -159,7 +164,9 @@ export default function OnlineMarker() {
                     setPhase('expired');
                     popIn();
                 } else {
-                    setSubmitError(msg || 'Submission failed. Tap Retry to try again.');
+                    // Transient failure: queue for background retry instead of losing it
+                    await queueOnlineSubmission(sessionId, msg);
+                    setSubmitError(msg || 'Submission failed. We will retry automatically when you are back online.');
                     setPhase('error');
                 }
             }
@@ -169,7 +176,33 @@ export default function OnlineMarker() {
                 setPhase('error');
             }
         }
-    }, [sessionId, popIn, startAutoDismiss]);
+    }, [sessionId, popIn, startAutoDismiss, drainQueue]);
+
+    // ── background retry queue ────────────────────────────────────────────────
+    const drainQueue = useCallback(async () => {
+        if (!isMounted.current || !sessionId) return;
+        try {
+            const synced = await syncPendingOnlineSubmissions();
+            if (synced > 0 && isMounted.current) {
+                setSubmitError('');
+            }
+        } catch (_) {}
+    }, [sessionId]);
+
+    useSyncOnReconnect(drainQueue);
+
+    useEffect(() => {
+        const sub = AppState.addEventListener('change', async (next) => {
+            if (next === 'active') {
+                if (queueTimer.current) clearTimeout(queueTimer.current);
+                queueTimer.current = setTimeout(() => drainQueue(), 500);
+            }
+        });
+        return () => sub.remove();
+    }, [drainQueue]);
+
+    // Drain queue on mount in case previous attempts failed while the app was dead
+    useEffect(() => { drainQueue(); }, [drainQueue]);
 
     useEffect(() => { run(); }, [run]);
 

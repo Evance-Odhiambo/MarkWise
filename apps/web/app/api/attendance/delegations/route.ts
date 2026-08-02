@@ -77,6 +77,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const MAX_DELEGATION_WINDOW_MS = 15 * 60 * 1000;
+  if (validUntil - validFrom > MAX_DELEGATION_WINDOW_MS) {
+    return NextResponse.json(
+      { error: "Delegation window must not exceed 15 minutes" },
+      { status: 422, headers: corsHeaders },
+    );
+  }
+
   // ── Confirm lecturer teaches this timetable entry ─────────────────────────
   const entry = await prisma.timetable.findUnique({
     where: { id: timetableEntryId },

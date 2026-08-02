@@ -1,5 +1,5 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, FlatList, InteractionManager, KeyboardAvoidingView, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, Vibration } from 'react-native';
+import { ActivityIndicator, Alert, AppState, FlatList, InteractionManager, KeyboardAvoidingView, Modal, Platform, Pressable, RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View, Vibration } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect } from '@react-navigation/native';
@@ -24,7 +24,6 @@ import useResponsive from '../../hooks/useResponsive';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useColors } from '../../theme';
 import { parseRescheduledInfo } from '../../utils/rescheduleInfo';
 
 const LESSON_STATUS_OPTIONS = ['Online', 'Cancelled', 'Confirmed', 'Rescheduled'];
@@ -37,11 +36,19 @@ const STATUS_DIALOG_LABELS = {
 };
 
 const STATUS_COLORS = {
-  Confirmed: '#15803D',
-  Pending: '#1D4ED8',
-  Cancelled: '#B91C1C',
-  Rescheduled: '#C2410C',
-  Online: '#0891B2',
+  Confirmed: '#10B981',
+  Pending: '#6366F1',
+  Cancelled: '#EF4444',
+  Rescheduled: '#F59E0B',
+  Online: '#06B6D4',
+};
+
+const STATUS_COLORS_LIGHT = {
+  Confirmed: '#D1FAE5',
+  Pending: '#E0E7FF',
+  Cancelled: '#FEE2E2',
+  Rescheduled: '#FEF3C7',
+  Online: '#CFFAFE',
 };
 
 const DAY_ORDER = {
@@ -59,23 +66,17 @@ const daySortValue = (value) => {
   return DAY_ORDER[key] || 99;
 };
 
-// Returns the most recent Saturday 00:00:00 (= Friday midnight / weekly reset point)
 const getLastWeekReset = () => {
   const d = new Date();
-  // getDay(): 0=Sun,1=Mon,...,5=Fri,6=Sat
-  // Days back to reach the most recent Saturday
   const daysBack = d.getDay() === 6 ? 0 : d.getDay() + 1;
   d.setDate(d.getDate() - daysBack);
   d.setHours(0, 0, 0, 0);
   return d;
 };
 
-// Statuses that auto-revert to Pending after Friday midnight each week
 const WEEKLY_STATUSES = new Set(['Cancelled', 'Rescheduled', 'Online']);
 
 const getEffectiveStatus = (entry) => {
-  // Compound state: Rescheduled + sub-status (e.g. Rescheduled + Confirmed).
-  // Always treat as 'Rescheduled' so the reschedule block remains visible.
   const hasRescheduleData = Boolean(
     entry?.rescheduleSubStatus ||
     entry?.rescheduledTo ||
@@ -110,15 +111,10 @@ const getEffectiveStatus = (entry) => {
   return updatedAt >= getLastWeekReset() ? stored : 'Pending';
 };
 
-
-//  Module-level cache  survives unmount/remount across tab navigation 
 const _timetableCache = { entries: null, timestamp: 0 };
 const STALE_MS = 5 * 60 * 1000;
-
 const RESCHEDULE_CACHE_KEY = '@lec_reschedule_overrides';
 
-// Persist { [entryId]: { rescheduledTo, reschedulePermanent } } so the card
-// survives refreshes while the backend hasn't stored the fields yet.
 const loadRescheduleCache = async () => {
   try {
     const raw = await AsyncStorage.getItem(RESCHEDULE_CACHE_KEY);
@@ -131,34 +127,6 @@ const saveRescheduleCache = async (cache) => {
 
 export default function AssignedTimetableScreen() {
   const { isTablet, isDesktop, contentMaxWidth } = useResponsive();
-  const colors = useColors();
-  const C = useMemo(() => ({
-    primary:     colors.primary.main,
-    primaryLt:   colors.primary.light,
-    primaryDk:   colors.primary.dark,
-    purpleLt:    colors.purple.light,
-    purpleDk:    colors.purple.dark,
-    success:     colors.success.main,
-    successLt:   colors.success.light,
-    dangerLt:    colors.danger.light,
-    warning:     colors.warning.main,
-    infoLt:      colors.info.light,
-    tealLt:      colors.teal.light,
-    tealDk:      colors.teal.dark,
-    bg:          colors.background.primary,
-    bgSec:       colors.background.secondary,
-    bgTert:      colors.background.tertiary,
-    primarySoft: colors.primary.soft,
-    surface:     colors.surface.primary,
-    textPri:     colors.text.primary,
-    textSec:     colors.text.secondary,
-    textMuted:   colors.text.muted,
-    textDarkSec: colors.light.text.secondary,
-    textMid:     colors.light.text.tertiary,
-    border:      colors.border.light,
-    borderMed:   colors.border.medium,
-  }), [colors]);
-  const S = useMemo(() => makeStyles(C), [C]);
   const rescheduleCacheRef = useRef({});
   const [isLoading, setIsLoading] = useState(() => !_timetableCache.entries);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -190,8 +158,6 @@ export default function AssignedTimetableScreen() {
   const [loadingGroups, setLoadingGroups] = useState(false);
   const [delegateError, setDelegateError] = useState('');
   const [delegating, setDelegating] = useState(false);
-
-  //  Make-up session state 
   const [makeupModal, setMakeupModal] = useState({ visible: false, entry: null });
   const [makeupDate, setMakeupDate] = useState(null);
   const [makeupStartTime, setMakeupStartTime] = useState(null);
@@ -207,8 +173,6 @@ export default function AssignedTimetableScreen() {
   const [showMakeupDatePicker, setShowMakeupDatePicker] = useState(false);
   const [showMakeupStartPicker, setShowMakeupStartPicker] = useState(false);
   const [showMakeupEndPicker, setShowMakeupEndPicker] = useState(false);
-
-  //  Merge lessons state 
   const [mergeModal, setMergeModal] = useState({ visible: false, entry: null });
   const [mergeSelectedIds, setMergeSelectedIds] = useState(new Set());
   const [mergeNote, setMergeNote] = useState('');
@@ -220,15 +184,12 @@ export default function AssignedTimetableScreen() {
   const [mergeRoomFilter, setMergeRoomFilter] = useState('');
   const [savingMerge, setSavingMerge] = useState(false);
   const [mergeError, setMergeError] = useState('');
-
-  //  Online status modal state 
   const [onlineModal, setOnlineModal] = useState({ visible: false, entry: null });
   const [onlineStartTime, setOnlineStartTime] = useState(null);
   const [onlineEndTime, setOnlineEndTime] = useState(null);
   const [showOnlineStartPicker, setShowOnlineStartPicker] = useState(false);
   const [showOnlineEndPicker, setShowOnlineEndPicker] = useState(false);
 
-  // Load the cache once on mount
   useEffect(() => {
     loadRescheduleCache().then((c) => { rescheduleCacheRef.current = c; });
   }, []);
@@ -250,23 +211,19 @@ export default function AssignedTimetableScreen() {
       const assigned = await fetchMyLecturerTimetable(session.token);
       setIsFromCache(wasLastTimetableFetchFromCache());
       const list = Array.isArray(assigned) ? assigned : [];
-      // Re-apply any locally-cached reschedule data the backend hasn't stored yet
       const cache = rescheduleCacheRef.current;
       const merged = list.map((e) => {
         const id = String(e?.id || '').trim();
         const override = cache[id];
         if (!override) return e;
-        // Only apply if the backend still hasn't returned the value
         return {
           ...e,
           rescheduledTo: e.rescheduledTo || override.rescheduledTo,
           reschedulePermanent: e.reschedulePermanent ?? override.reschedulePermanent,
-          // Restore compound sub-status (e.g. Rescheduled + Confirmed) from local cache
           ...(override.rescheduleSubStatus ? { status: 'Rescheduled', rescheduleSubStatus: override.rescheduleSubStatus } : {}),
         };
       });
 
-      // Also load make-up / extra sessions and merge them in
       let extraMapped = [];
       try {
         const extraSessions = await fetchMyExtraSessions(session.token);
@@ -292,7 +249,7 @@ export default function AssignedTimetableScreen() {
             sessionId: s.id || s._id || s.sessionId || '',
           };
         });
-      } catch (_) { /* extra sessions are non-critical */ }
+      } catch (_) { }
 
       const finalEntries = [...merged, ...extraMapped];
       setEntries(finalEntries);
@@ -300,7 +257,6 @@ export default function AssignedTimetableScreen() {
       _timetableCache.timestamp = Date.now();
       setLastRefreshed(new Date());
 
-      // Write pending-lesson reminders for today and tomorrow
       try {
         const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
         const todayIdx = new Date().getDay();
@@ -323,7 +279,6 @@ export default function AssignedTimetableScreen() {
           }));
         await AsyncStorage.setItem('markwise.lecturer.status_reminders.v1', JSON.stringify(pendingReminders));
 
-        // Play notification sound — rate-limited to once every 4 hours
         if (pendingReminders.length > 0) {
           const COOLDOWN_KEY = 'markwise.lecturer.reminder_notif_last.v1';
           const lastRaw = await AsyncStorage.getItem(COOLDOWN_KEY);
@@ -344,9 +299,9 @@ export default function AssignedTimetableScreen() {
             });
           }
         }
-      } catch (_) { /* reminders are non-critical */ }
+      } catch (_) { }
     } catch (error) {
-      if (_timetableCache.entries) return; // silently keep cached data on error
+      if (_timetableCache.entries) return;
       setEntries([]);
       setIsFromCache(false);
       setErrorMessage(error?.message || 'Unable to load timetable.');
@@ -370,13 +325,11 @@ export default function AssignedTimetableScreen() {
     }, [load]),
   );
 
-  // Refresh immediately when a foreground FCM timetable event arrives
   useEffect(() => {
     const sub = onTimetableUpdated(() => { load(false, true); });
     return () => sub?.remove();
   }, [load]);
 
-  // Refresh when app returns to foreground; honour the dirty flag set by background FCM
   useEffect(() => {
     const appStateRef = { current: AppState.currentState };
     const sub = AppState.addEventListener('change', async (nextState) => {
@@ -408,9 +361,6 @@ export default function AssignedTimetableScreen() {
       }));
   }, [entries]);
 
-  // Map from entry.id → array of entries eligible to merge with it.
-  // Only requires the same normalised unit code — cross-day and cross-time merges
-  // are allowed since the lecturer may combine sections from different schedules.
   const mergeCandidatesMap = useMemo(() => {
     const nc = (c) => String(c || '').toUpperCase().replace(/\s+/g, '');
     const map = {};
@@ -433,9 +383,7 @@ export default function AssignedTimetableScreen() {
 
   const handleStatusChange = useCallback(async (entry, nextStatus, extraPayload = {}) => {
     const status = String(nextStatus || '').trim();
-    if (!status) {
-      return;
-    }
+    if (!status) return;
 
     const entryId = String(entry?.id || '').trim();
     if (!entryId) {
@@ -444,17 +392,13 @@ export default function AssignedTimetableScreen() {
     }
 
     const currentStatus = String(entry?.status || '').trim();
-    if (status === currentStatus) {
-      return;
-    }
+    if (status === currentStatus) return;
 
     const updateKey = `${entryId}:${status}`;
     setUpdatingEntryKey(updateKey);
 
     const optimisticReason = status === 'Cancelled' ? (extraPayload.reason || entry?.reason || 'Cancelled by lecturer') : entry?.reason;
     const optimisticPendingReason = status === 'Pending' ? entry?.pendingReason || 'Awaiting lecturer confirmation' : entry?.pendingReason;
-    // Compound transition: entry is Rescheduled and lecturer picks Confirmed/Cancelled/Online
-    //  keep displaying as 'Rescheduled' but add a rescheduleSubStatus
     const isCompound = entry?.status === 'Rescheduled' && status !== 'Rescheduled';
     const optimisticRescheduledTo = (status === 'Rescheduled' || isCompound) ? (extraPayload.rescheduledTo || entry?.rescheduledTo || 'To be announced') : null;
     const optimisticReschedulePermanent = (status === 'Rescheduled' || isCompound) ? (extraPayload.reschedulePermanent ?? entry?.reschedulePermanent ?? false) : entry?.reschedulePermanent;
@@ -474,7 +418,6 @@ export default function AssignedTimetableScreen() {
           pendingReason: optimisticPendingReason || null,
           rescheduledTo: optimisticRescheduledTo,
           reschedulePermanent: optimisticReschedulePermanent,
-          // Free the room only when directly switching to Online (not a compound rescheduledonline)
           venue: (status === 'Online' && !isCompound) ? null : row.venue,
           roomCode: (status === 'Online' && !isCompound) ? null : row.roomCode,
           lectureRoom: (status === 'Online' && !isCompound) ? null : row.lectureRoom,
@@ -516,16 +459,13 @@ export default function AssignedTimetableScreen() {
 
       const result = await updateLecturerTimetableEntryStatus(payload);
 
-      // Always update the local state with the server response to ensure consistency
       setEntries((previous) =>
         previous.map((row) => {
           if (String(row?.id || '').trim() !== entryId) return row;
           
-          // If server returned updated entry, merge it with current data
           if (result?.updatedEntry) {
             const merged = { ...row, ...result.updatedEntry };
             
-            // Preserve optimistic values if server didn't return them
             if (status === 'Rescheduled' || isCompound) {
               if (!merged.rescheduledTo) merged.rescheduledTo = optimisticRescheduledTo;
               if (merged.reschedulePermanent == null) merged.reschedulePermanent = optimisticReschedulePermanent;
@@ -535,7 +475,6 @@ export default function AssignedTimetableScreen() {
               }
             }
             
-            // Ensure updatedAt and statusSource are set
             merged.updatedAt = merged.updatedAt || new Date().toISOString();
             merged.statusSource = merged.statusSource || 'lecturer';
             merged.updatedBy = merged.updatedBy || 'Lecturer';
@@ -543,13 +482,11 @@ export default function AssignedTimetableScreen() {
             return merged;
           }
           
-          // If no server response, keep the optimistic update
           return row;
         })
       );
 
       if (status === 'Rescheduled' || isCompound) {
-        // Persist locally so the card survives refreshes until the backend stores it
         const updatedCache = {
           ...rescheduleCacheRef.current,
           [entryId]: {
@@ -561,13 +498,11 @@ export default function AssignedTimetableScreen() {
         rescheduleCacheRef.current = updatedCache;
         saveRescheduleCache(updatedCache);
       } else {
-        // Remove the cache entry if status changed away from Rescheduled
         const { [entryId]: _removed, ...rest } = rescheduleCacheRef.current;
         rescheduleCacheRef.current = rest;
         saveRescheduleCache(rest);
       }
     } catch (error) {
-      // Revert optimistic update on error
       setEntries((previous) =>
         previous.map((row) => (String(row?.id || '').trim() === entryId ? entry : row))
       );
@@ -587,13 +522,11 @@ export default function AssignedTimetableScreen() {
     setCancelModal({ visible: false, entry: null });
     setCancelReason('');
     handleStatusChange(entry, 'Cancelled', { reason });
-    // Propagate cancel to all sibling entries in the same merged group
     if (entry?.isMerged && entry?.mergedSessionId) {
       entries
         .filter((e) => String(e?.mergedSessionId || '') === String(entry.mergedSessionId) && String(e?.id || '') !== String(entry.id || ''))
         .forEach((sibling) => handleStatusChange(sibling, 'Cancelled', { reason }));
     }
-    // Notify students  one notification covering all merged sections
     {
       const unitCode = String(entry?.unitCode || entry?.code || '').trim();
       const allSiblings = (entry?.isMerged && entry?.mergedSessionId)
@@ -667,7 +600,6 @@ export default function AssignedTimetableScreen() {
       const reqStart = formatTime(rescheduleStartTime);
       const reqEnd = formatTime(rescheduleEndTime);
 
-      // Helper: convert "HH:mm" to minutes since midnight for easy overlap check
       const toMinutes = (t) => {
         const [h, m] = String(t || '').split(':').map(Number);
         return (h || 0) * 60 + (m || 0);
@@ -675,35 +607,27 @@ export default function AssignedTimetableScreen() {
       const reqStartMin = toMinutes(reqStart);
       const reqEndMin = toMinutes(reqEnd);
 
-      // 1. Fetch all rooms for the institution
       const roomData = await fetchRooms({
         institutionId: session.institutionId,
         token: session.token,
       });
       const allRooms = roomData?.data?.rooms || roomData?.rooms || (Array.isArray(roomData) ? roomData : []);
 
-      // 2. Build a set of busy room IDs by checking existing timetable entries
       const busyRoomIds = new Set();
 
-      // Check timetable entries (already loaded in `entries` state)
       entries.forEach((entry) => {
         const entryDay = String(entry?.day || '').trim();
         const entryStatus = String(entry?.status || '').trim();
-        // Skip cancelled and merged entries  their room is free
         if (entryStatus === 'Cancelled') return;
         if (entry?.isMerged) return;
 
-        // For rescheduled entries: the ORIGINAL slot is free, but check if
-        // they were rescheduled TO the requested day/time
         if (entryStatus === 'Rescheduled') {
           const rTo = String(entry?.rescheduledTo || '').trim();
-          // rescheduledTo format: "Day HH:mm - HH:mm - RoomCode"
           const match = rTo.match(/^(\w+)\s+(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})/);
           if (match && match[1] === rescheduleDay) {
             const rStart = toMinutes(match[2]);
             const rEnd = toMinutes(match[3]);
             if (rStart < reqEndMin && rEnd > reqStartMin) {
-              // Overlaps  the rescheduled room is busy
               const rRoom = rTo.split('|').pop()?.trim();
               if (rRoom) {
                 allRooms.forEach((room) => {
@@ -715,10 +639,9 @@ export default function AssignedTimetableScreen() {
               }
             }
           }
-          return; // Original slot is free  don't block the original room
+          return;
         }
 
-        // Normal active entry: check if it overlaps on the same day
         if (entryDay !== rescheduleDay) return;
 
         const timeStr = String(entry?.time || '').trim();
@@ -730,7 +653,6 @@ export default function AssignedTimetableScreen() {
           entryStartMin = toMinutes(eStart);
           entryEndMin = toMinutes(eEnd);
         } else if (timeStr) {
-          // time format: "08:00 - 10:00"
           const parts = timeStr.split('-').map((s) => s.trim());
           entryStartMin = toMinutes(parts[0]);
           entryEndMin = parts[1] ? toMinutes(parts[1]) : entryStartMin + 60;
@@ -738,7 +660,6 @@ export default function AssignedTimetableScreen() {
           return;
         }
 
-        // Overlap check
         if (entryStartMin < reqEndMin && entryEndMin > reqStartMin) {
           const roomId = String(entry?.roomId || entry?.room_id || '');
           const roomCode = String(entry?.roomCode || entry?.room_code || entry?.venueCode || entry?.venue_code || entry?.venue || entry?.lectureRoom || entry?.room || entry?.location || '').trim();
@@ -755,7 +676,6 @@ export default function AssignedTimetableScreen() {
         }
       });
 
-      // 3. Also exclude rooms that have active bookings overlapping the slot
       allRooms.forEach((room) => {
         const bookings = Array.isArray(room.bookings) ? room.bookings : [];
         bookings.forEach((bk) => {
@@ -777,7 +697,6 @@ export default function AssignedTimetableScreen() {
         });
       });
 
-      // 4. Filter to only free rooms
       const freeRooms = allRooms.filter((room) => {
         const id = String(room.id || room._id);
         return !busyRoomIds.has(id);
@@ -804,7 +723,6 @@ export default function AssignedTimetableScreen() {
     const currentCode = getLessonTypeByName(entry?.type || entry?.lessonType).code;
     if (newTypeCode === currentCode) return;
 
-    // Collect all entry IDs to update: just this entry, or all merged siblings too
     const siblingIds = (entry?.isMerged && entry?.mergedSessionId)
       ? entries
           .filter((e) => String(e?.mergedSessionId || '') === String(entry.mergedSessionId))
@@ -823,7 +741,6 @@ export default function AssignedTimetableScreen() {
     try {
       const session = await getLecturerSession();
       if (!session?.token) throw new Error('Session expired. Please sign in again.');
-      // Fire update for every entry in the group (individual entries only fire once)
       await Promise.all(
         siblingIds.map((id) =>
           updateLecturerTimetableEntryStatus({
@@ -839,7 +756,6 @@ export default function AssignedTimetableScreen() {
         handleOpenDelegate(entry);
       }
     } catch (error) {
-      // Roll back all affected entries
       setEntries((prev) =>
         prev.map((row) => {
           if (!siblingIds.includes(String(row?.id || '').trim())) return row;
@@ -873,9 +789,6 @@ export default function AssignedTimetableScreen() {
     const unitCode = String(entry?.unitCode || entry?.code || '').trim();
     const roomCode = String(entry?.roomCode || entry?.venueCode || entry?.venue || '').trim();
 
-    // Ensure adaptiveConfig has institution mappings loaded before resolving BLE IDs.
-    // On the lecturer's device these may not be cached yet, so we sync from the backend
-    // if the mappings are absent.
     try {
       const lecSession = await getLecturerSession();
       if (lecSession?.institutionId) {
@@ -896,7 +809,6 @@ export default function AssignedTimetableScreen() {
       leaderStudentId: g.leaderId || g.leader?.id || g.leader?._id || null,
     }));
 
-    // Only send groups that have a leader assigned  backend cannot notify leaderless groups
     const groups = allGroups.filter((g) => g.leaderStudentId);
     const skipped = allGroups.length - groups.length;
 
@@ -910,15 +822,8 @@ export default function AssignedTimetableScreen() {
     setDelegating(true);
     setDelegateError('');
     try {
-      // Resolve BLE numeric IDs from the code-string mappings.
-      // entry.unitId / entry.roomId are DB FKs (small integers), NOT the
-      // BLE packet IDs (units 0-7999, rooms 8000-9999). Always prefer the
-      // adaptiveConfig lookup which returns the correct BLE-range value.
       const bleUnitId = adaptiveConfig.getUnitId(unitCode) ?? Number(entry?.unitId || 0);
       const bleRoomId = adaptiveConfig.getRoomId(roomCode) ?? Number(entry?.roomId || 0);
-      console.log(
-        `[Delegation] BLE IDs resolved: unit=${unitCode}${bleUnitId}, room=${roomCode}${bleRoomId}`,
-      );
 
       const payload = {
         timetableEntryId: entry.id,
@@ -927,13 +832,9 @@ export default function AssignedTimetableScreen() {
         roomCode,
         roomId: bleRoomId,
         groups,
-        // Day-scoped window: any group can meet at any time today.
-        // The exact meeting time is controlled by when the leader taps Start,
-        // not by a tight pre-set window.
         validFrom: (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); })(),
         validUntil: (() => { const d = new Date(); d.setHours(23, 59, 59, 999); return d.getTime(); })(),
       };
-      console.log('[Delegation] createDelegation payload:', JSON.stringify(payload, null, 2));
       await createDelegation(payload);
       setDelegateModal({ visible: false, entry: null });
       const skippedMsg = skipped > 0 ? ` (${skipped} group${skipped > 1 ? 's' : ''} skipped - no leader assigned)` : '';
@@ -965,13 +866,11 @@ export default function AssignedTimetableScreen() {
       roomId: selectedRoom.id || selectedRoom._id || null,
     };
     handleStatusChange(entry, 'Rescheduled', reschedulePayload);
-    // Propagate reschedule to all sibling entries in the same merged group
     if (entry?.isMerged && entry?.mergedSessionId) {
       entries
         .filter((e) => String(e?.mergedSessionId || '') === String(entry.mergedSessionId) && String(e?.id || '') !== String(entry.id || ''))
         .forEach((sibling) => handleStatusChange(sibling, 'Rescheduled', reschedulePayload));
     }
-    // Notify students  one notification covering all merged sections
     {
       const unitCode = String(entry?.unitCode || entry?.code || '').trim();
       const allSiblings = (entry?.isMerged && entry?.mergedSessionId)
@@ -1226,8 +1125,6 @@ export default function AssignedTimetableScreen() {
     }
   }, [makeupModal, makeupDate, makeupStartTime, makeupEndTime, makeupSelectedRoom, makeupLessonType, formatTime, closeMakeupModal]);
 
-  //  Merge lessons handlers 
-
   const closeMergeModal = useCallback(() => {
     setMergeModal({ visible: false, entry: null });
     setMergeSelectedIds(new Set());
@@ -1280,7 +1177,7 @@ export default function AssignedTimetableScreen() {
       const busyRoomIds = new Set();
       entries.forEach((e) => {
         if (mergeSelectedIds.has(String(e.id))) return;
-        if (e?.isMerged) return; // merged entries have vacated their original room
+        if (e?.isMerged) return;
         const entryDay = String(e?.day || '').trim();
         const entryStatus = String(e?.status || '').trim();
         if (entryStatus === 'Cancelled') return;
@@ -1456,10 +1353,8 @@ export default function AssignedTimetableScreen() {
     );
   }, []);
 
-  //  Design helpers 
   const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const todayName = DAYS_OF_WEEK[new Date().getDay()];
-
   const [tick, setTick] = useState(() => new Date());
   useEffect(() => {
     const id = setInterval(() => setTick(new Date()), 30000);
@@ -1505,9 +1400,7 @@ export default function AssignedTimetableScreen() {
       }
     }
     return null;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entries, tick]);
-
 
   const todayLabel = tick.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
 
@@ -1525,558 +1418,563 @@ export default function AssignedTimetableScreen() {
     return nextClass.dayName;
   }, [nextClass]);
 
-
-
   return (
-    <SafeAreaView style={S.screen} edges={['top']}>
-
-      {/*  Header  */}
+    <SafeAreaView className="flex-1 bg-gray-50" edges={['top']}>
+      {/* Modern Gradient Header */}
       <LinearGradient
-        colors={['#1E1B4B', '#3730A3', C.primaryDk]}
-        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-        style={S.header}
+        colors={['#1E1B4B', '#312E81', '#4338CA']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        className="relative overflow-hidden px-5 pb-5"
+        style={{ paddingTop: Platform.OS === 'ios' ? 44 : 20 }}
       >
-        {/* Decorative glow orb */}
-        <View style={S.headerOrb} />
-
-        {/* Title row */}
-        <View style={S.headerTitleRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={S.headerTitle}>My Timetable</Text>
-            <Text style={S.headerDate}>{todayLabel}</Text>
-          </View>
-          <View style={S.headerTopRight}>
-            {isBackgroundUpdate
-              ? <View style={S.bgDot} />
-              : lastRefreshed
-                ? (
-                  <View style={S.syncBadge}>
-                    <Icon name="check-circle-outline" size={10} color="#6EE7B7" />
-                    <Text style={S.syncBadgeText}>
-                      {lastRefreshed.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-                    </Text>
-                  </View>
-                )
-                : null
-            }
-          </View>
-        </View>
-
-        {/* Stats strip — full width, 4 cells */}
-        <View style={S.statStrip}>
-          <View style={S.statCell}>
-            <View style={S.statIconWrap}>
-              <Icon name="calendar-week" size={13} color="rgba(255,255,255,0.75)" />
-            </View>
-            <Text style={S.statValue}>{weeklyStats.totalSessions}</Text>
-            <Text style={S.statLabel}>Sessions</Text>
-          </View>
-          <View style={S.statDiv} />
-          <View style={S.statCell}>
-            <View style={[S.statIconWrap, { backgroundColor: 'rgba(165,180,252,0.18)' }]}>
-              <Icon name="calendar-today" size={13} color="#A5B4FC" />
-            </View>
-            <Text style={S.statValue}>{weeklyStats.todayCount}</Text>
-            <Text style={S.statLabel}>Today</Text>
-          </View>
-          <View style={S.statDiv} />
-          <View style={S.statCell}>
-            <View style={[S.statIconWrap, { backgroundColor: 'rgba(110,231,183,0.18)' }]}>
-              <Icon name="book-open-variant" size={13} color="#6EE7B7" />
-            </View>
-            <Text style={S.statValue}>{weeklyStats.unitCount}</Text>
-            <Text style={S.statLabel}>Units</Text>
-          </View>
-          <View style={S.statDiv} />
-          <View style={S.statCell}>
-            <View style={[S.statIconWrap, { backgroundColor: weeklyStats.pendingCount > 0 ? 'rgba(252,211,77,0.18)' : 'rgba(255,255,255,0.07)' }]}>
-              <Icon name="clock-alert-outline" size={13} color={weeklyStats.pendingCount > 0 ? '#FCD34D' : 'rgba(255,255,255,0.35)'} />
-            </View>
-            <Text style={[S.statValue, weeklyStats.pendingCount > 0 && { color: '#FCD34D' }]}>
-              {weeklyStats.pendingCount}
+        {/* Decorative elements */}
+        <View className="absolute -top-20 -right-20 w-64 h-64 rounded-full bg-indigo-400/5" />
+        <View className="absolute top-10 -left-20 w-48 h-48 rounded-full bg-violet-400/5" />
+        
+        {/* Header Content */}
+        <View className="flex-row items-center justify-between mb-4">
+          <View>
+            <Text className="text-2xl font-bold text-white tracking-tight">
+              Timetable
             </Text>
-            <Text style={S.statLabel}>Pending</Text>
+            <Text className="text-sm text-indigo-200/70 font-medium mt-0.5">
+              {todayLabel}
+            </Text>
+          </View>
+          {lastRefreshed && (
+            <View className="bg-white/10 backdrop-blur-sm rounded-full px-3 py-1.5 border border-white/10">
+              <Text className="text-xs text-indigo-200 font-medium">
+                {lastRefreshed.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {/* Stats Cards */}
+        <View className="flex-row gap-2 mb-3">
+          <View className="flex-1 bg-white/10 backdrop-blur-sm rounded-2xl p-3 border border-white/5">
+            <Text className="text-2xl font-bold text-white">{weeklyStats.totalSessions}</Text>
+            <Text className="text-xs text-indigo-200/60 font-medium">Total Sessions</Text>
+          </View>
+          <View className="flex-1 bg-white/10 backdrop-blur-sm rounded-2xl p-3 border border-white/5">
+            <Text className="text-2xl font-bold text-indigo-200">{weeklyStats.todayCount}</Text>
+            <Text className="text-xs text-indigo-200/60 font-medium">Today</Text>
+          </View>
+          <View className="flex-1 bg-white/10 backdrop-blur-sm rounded-2xl p-3 border border-white/5">
+            <Text className="text-2xl font-bold text-emerald-300">{weeklyStats.pendingCount}</Text>
+            <Text className="text-xs text-indigo-200/60 font-medium">Pending</Text>
           </View>
         </View>
 
-        {/* Next class card */}
+        {/* Next Class Card */}
         {nextClass && (
-          <View style={S.nextCard}>
-            <View style={S.nextCardLeft}>
-              <View style={S.nextCardBadge}>
-                <Icon
-                  name={nextClass.isNow ? 'play-circle-outline' : 'clock-fast'}
-                  size={10}
-                  color={nextClass.isNow ? '#6EE7B7' : '#A5B4FC'}
-                />
-                <Text style={[S.nextCardBadgeText, { color: nextClass.isNow ? '#6EE7B7' : '#A5B4FC' }]}>
-                  {nextClass.isNow ? 'IN PROGRESS' : 'NEXT CLASS'}
+          <View className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/10">
+            <View className="flex-row items-center justify-between">
+              <View className="flex-1">
+                <View className="flex-row items-center gap-2 mb-1">
+                  <View className={`w-1.5 h-1.5 rounded-full ${nextClass.isNow ? 'bg-emerald-400' : 'bg-indigo-300'}`} />
+                  <Text className={`text-xs font-bold tracking-wider ${nextClass.isNow ? 'text-emerald-300' : 'text-indigo-200'}`}>
+                    {nextClass.isNow ? '● IN PROGRESS' : 'NEXT CLASS'}
+                  </Text>
+                </View>
+                <Text className="text-white font-semibold text-base" numberOfLines={1}>
+                  {nextClass.session.unitTitle || nextClass.session.unitCode || '—'}
+                </Text>
+                <Text className="text-indigo-200/60 text-xs mt-0.5" numberOfLines={1}>
+                  {[
+                    nextClass.session.unitCode,
+                    nextClass.session.startTime,
+                    nextClass.session.roomCode || nextClass.session.lectureRoom,
+                    nextClass.offset > 0 ? nextClass.dayName : null,
+                  ].filter(Boolean).join(' · ')}
                 </Text>
               </View>
-              <Text style={S.nextCardName} numberOfLines={1}>
-                {nextClass.session.unitTitle || nextClass.session.unitCode || '—'}
-              </Text>
-              <Text style={S.nextCardMeta} numberOfLines={1}>
-                {[
-                  nextClass.session.unitCode,
-                  nextClass.session.startTime,
-                  nextClass.session.roomCode || nextClass.session.lectureRoom,
-                  nextClass.offset > 0 ? nextClass.dayName : null,
-                ].filter(Boolean).join(' · ')}
-              </Text>
-            </View>
-            <View style={S.nextCardRight}>
-              <Text style={[S.nextCardCountdown, nextClass.isNow && { color: '#6EE7B7' }]}>
-                {nextCountdown}
-              </Text>
-              <Icon
-                name={nextClass.isNow ? 'broadcast' : 'chevron-right'}
-                size={14}
-                color={nextClass.isNow ? '#6EE7B7' : 'rgba(255,255,255,0.35)'}
-              />
+              <View className="items-center">
+                <Text className={`text-lg font-bold ${nextClass.isNow ? 'text-emerald-300' : 'text-white'}`}>
+                  {nextCountdown}
+                </Text>
+              </View>
             </View>
           </View>
         )}
       </LinearGradient>
 
       {isFromCache && (
-        <View style={S.offlineBanner}>
-          <Icon name="wifi-off" size={13} color="#F59E0B" />
-          <Text style={S.offlineBannerText}>Cached — pull to refresh when online</Text>
+        <View className="bg-amber-50/90 border-b border-amber-200/50 px-4 py-2.5 flex-row items-center gap-2">
+          <Icon name="wifi-off" size={16} color="#D97706" />
+          <Text className="flex-1 text-sm font-medium text-amber-700">
+            Cached — pull to refresh when online
+          </Text>
         </View>
       )}
 
-      {/*  Scrollable content  */}
       <ScrollView
-        style={S.scroll}
-        contentContainerStyle={[S.scrollContent, (isTablet || isDesktop) && { maxWidth: contentMaxWidth, alignSelf: 'center', width: '100%' }]}
+        className="flex-1"
+        contentContainerClassName="px-4 pb-8 pt-3"
+        contentContainerStyle={(isTablet || isDesktop) ? { maxWidth: contentMaxWidth, alignSelf: 'center', width: '100%' } : undefined}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={isRefreshing}
             onRefresh={() => { setIsRefreshing(true); load(false); }}
-            colors={[C.primary]} tintColor="#6366F1"
+            colors={['#6366F1']}
+            tintColor="#6366F1"
           />
         }
       >
-      {isLoading ? (
-        <View style={S.centerState}>
-          <ActivityIndicator size="large" color="#7C3AED" />
-          <Text style={S.stateText}>Loading assigned timetable...</Text>
-        </View>
-      ) : errorMessage ? (
-        <View style={S.centerState}>
-          <Text style={S.errorText}>{errorMessage}</Text>
-        </View>
-      ) : groupedByDay.length === 0 ? (
-        <View style={S.centerState}>
-          <Text style={S.stateText}>No timetable entries assigned yet.</Text>
-        </View>
-      ) : (
-        groupedByDay.map((group) => {
-          const isToday = group.day.toLowerCase() === todayName.toLowerCase();
-          return (
-          <View key={group.day} style={[S.dayCard, isToday && S.dayCardToday]}>
-            <View style={S.dayTitleRow}>
-              <Text style={[S.dayTitle, isToday && S.dayTitleToday]}>{group.day}</Text>
-              {isToday && <View style={S.todayPill}><Text style={S.todayPillText}>Today</Text></View>}
-            </View>
-            {group.items.map((entry, index) => {
-              //  Merged group: render a single combined card for the first entry 
-              if (entry.isMerged && entry.mergedSessionId) {
-                const mergedGroup = group.items.filter(
-                  (e) => String(e.mergedSessionId) === String(entry.mergedSessionId),
-                );
-                if (String(mergedGroup[0]?.id) !== String(entry.id)) return null;
-                const totalStudents = mergedGroup.reduce(
-                  (sum, e) => sum + (parseInt(e.studentCount || e.students || 0, 10)),
-                  0,
-                );
-                const mergedStatus = getEffectiveStatus(entry);
-                const mergedStatusColor = STATUS_COLORS[mergedStatus] || C.textDarkSec;
-                const anyMergedUpdating = mergedGroup.some((e) =>
-                  updatingEntryKey.startsWith(`${String(e?.id || '')}:`),
-                );
-                return (
-                  <View key={`merged-${entry.mergedSessionId}`} style={S.mergedGroupCard}>
-                    <View style={S.mergedGroupHeader}>
-                      <View style={{ flex: 1 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                          <Text style={S.mergedGroupTitle}>Merged Session</Text>
-                          {entry.mergedBy === 'Admin' ? (
-                            <View style={S.mergedByAdminBadge}>
-                              <Text style={S.mergedByAdminBadgeText}>Admin</Text>
-                            </View>
-                          ) : (
-                            <View style={S.mergedByLecturerBadge}>
-                              <Text style={S.mergedByLecturerBadgeText}>You</Text>
-                            </View>
-                          )}
-                        </View>
-                        <Text style={S.mergedGroupSubtitle}>
-                          {mergedGroup.length} sections combined, Room {entry.mergedRoom || ''}
-                        </Text>
+        {isLoading ? (
+          <View className="flex-1 items-center justify-center py-20">
+            <ActivityIndicator size="large" color="#6366F1" />
+            <Text className="mt-4 text-gray-500 text-sm font-medium">Loading timetable...</Text>
+          </View>
+        ) : errorMessage ? (
+          <View className="flex-1 items-center justify-center py-20">
+            <Icon name="alert-circle-outline" size={48} color="#EF4444" />
+            <Text className="mt-3 text-red-500 text-sm text-center font-medium">{errorMessage}</Text>
+          </View>
+        ) : groupedByDay.length === 0 ? (
+          <View className="flex-1 items-center justify-center py-20">
+            <Icon name="calendar-blank" size={48} color="#9CA3AF" />
+            <Text className="mt-3 text-gray-500 text-sm font-medium">No timetable entries assigned yet.</Text>
+          </View>
+        ) : (
+          groupedByDay.map((group) => {
+            const isToday = group.day.toLowerCase() === todayName.toLowerCase();
+            return (
+              <View key={group.day} className="mb-4">
+                {/* Day Header */}
+                <View className="flex-row items-center justify-between mb-3 px-1">
+                  <View className="flex-row items-center gap-2">
+                    <Text className={`text-lg font-bold ${isToday ? 'text-indigo-600' : 'text-gray-700'}`}>
+                      {group.day}
+                    </Text>
+                    {isToday && (
+                      <View className="bg-indigo-100 px-3 py-0.5 rounded-full">
+                        <Text className="text-xs font-bold text-indigo-600">Today</Text>
                       </View>
-                      <View style={{ alignItems: 'flex-end', gap: 6 }}>
-                        <TouchableOpacity
-                          style={[S.statusDropdownBtn, { borderColor: mergedStatusColor, backgroundColor: mergedStatusColor + '12' }]}
-                          onPress={() => setOpenDropdownEntryId(String(entry.id))}
-                          disabled={anyMergedUpdating}
-                          activeOpacity={0.85}
-                        >
-                          {anyMergedUpdating ? (
-                            <ActivityIndicator size="small" color={mergedStatusColor} />
-                          ) : (
-                            <>
-                              <Text style={[S.statusDropdownBtnText, { color: mergedStatusColor }]}>
+                    )}
+                  </View>
+                  <Text className="text-xs text-gray-400 font-medium">
+                    {group.items.length} session{group.items.length !== 1 ? 's' : ''}
+                  </Text>
+                </View>
+
+                {/* Session Cards */}
+                {group.items.map((entry, index) => {
+                  // Merged group rendering
+                  if (entry.isMerged && entry.mergedSessionId) {
+                    const mergedGroup = group.items.filter(
+                      (e) => String(e.mergedSessionId) === String(entry.mergedSessionId),
+                    );
+                    if (String(mergedGroup[0]?.id) !== String(entry.id)) return null;
+                    
+                    const mergedStatus = getEffectiveStatus(entry);
+                    const mergedStatusColor = STATUS_COLORS[mergedStatus] || '#6B7280';
+                    const mergedStatusBg = STATUS_COLORS_LIGHT[mergedStatus] || '#F3F4F6';
+                    
+                    return (
+                      <View key={`merged-${entry.mergedSessionId}`} className="bg-white rounded-2xl p-4 mb-3 shadow-sm border border-indigo-100/50">
+                        <View className="flex-row items-start justify-between mb-3">
+                          <View className="flex-1">
+                            <View className="flex-row items-center gap-2 mb-0.5">
+                              <Icon name="layers" size={18} color="#6366F1" />
+                              <Text className="text-sm font-bold text-indigo-600">Merged Session</Text>
+                              {entry.mergedBy === 'Admin' ? (
+                                <View className="bg-purple-100 px-2 py-0.5 rounded-full">
+                                  <Text className="text-xs font-bold text-purple-600">Admin</Text>
+                                </View>
+                              ) : (
+                                <View className="bg-emerald-100 px-2 py-0.5 rounded-full">
+                                  <Text className="text-xs font-bold text-emerald-600">You</Text>
+                                </View>
+                              )}
+                            </View>
+                            <Text className="text-xs text-gray-500 font-medium">
+                              {mergedGroup.length} sections • Room {entry.mergedRoom || ''}
+                            </Text>
+                          </View>
+                          <View className="items-end gap-2">
+                            <TouchableOpacity
+                              className="flex-row items-center px-3 py-1.5 rounded-lg border"
+                              style={{ borderColor: mergedStatusColor, backgroundColor: mergedStatusBg }}
+                              onPress={() => setOpenDropdownEntryId(String(entry.id))}
+                            >
+                              <Text className="text-xs font-bold" style={{ color: mergedStatusColor }}>
                                 {mergedStatus === 'Rescheduled' && entry.rescheduleSubStatus
                                   ? `${mergedStatus} - ${entry.rescheduleSubStatus}`
                                   : mergedStatus}
                               </Text>
-                              <Text style={[S.statusDropdownChevron, { color: mergedStatusColor }]}>{'-'}</Text>
-                            </>
+                            </TouchableOpacity>
+                            {entry.mergedBy !== 'Admin' && (
+                              <TouchableOpacity
+                                className="px-3 py-1 rounded-lg bg-red-50 border border-red-200"
+                                onPress={() => handleUnmerge(entry)}
+                              >
+                                <Text className="text-xs font-semibold text-red-500">Unmerge</Text>
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                        </View>
+
+                        {/* Merged Sections */}
+                        {mergedGroup.map((e) => (
+                          <View key={String(e.id)} className="border-t border-gray-100 pt-2 mt-2">
+                            <Text className="text-sm font-semibold text-gray-700">{e.unitTitle || e.unitName || e.unitCode}</Text>
+                          </View>
+                        ))}
+
+                        {/* Footer */}
+                        <View className="mt-3 pt-3 border-t border-gray-100">
+                          {!!entry.mergedStart && !!entry.mergedEnd && (
+                            <Text className="text-xs text-gray-500 font-medium">
+                              <Icon name="clock-outline" size={12} color="#6B7280" /> {entry.mergedStart} - {entry.mergedEnd}
+                            </Text>
                           )}
-                        </TouchableOpacity>
-                        {entry.mergedBy !== 'Admin' && (
-                          <TouchableOpacity
-                            style={S.unmergeBtn}
-                            onPress={() => handleUnmerge(entry)}
-                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                            activeOpacity={0.7}
-                          >
-                            <Text style={S.unmergeBtnText}>Unmerge</Text>
-                          </TouchableOpacity>
-                        )}
-                      </View>
-                    </View>
-                    {mergedGroup.map((e) => (
-                      <View key={String(e.id)} style={S.mergedGroupSectionRow}>
-                        <Text style={S.mergedGroupSectionUnit}>
-                          {e.unitTitle || e.unitName || e.unitCode}
-                        </Text>
-                      </View>
-                    ))}
-                    <View style={S.mergedGroupFooter}>
-                      {!!entry.mergedStart && !!entry.mergedEnd && (
-                        <Text style={S.mergedGroupMeta}>
-                          {entry.mergedStart} - {entry.mergedEnd}
-                        </Text>
-                      )}
-                      {!!totalStudents && (
-                        <Text style={S.mergedGroupMeta}>{totalStudents} students combined</Text>
-                      )}
-                      {!!entry.mergedNote && (
-                        <Text style={S.mergedGroupNote}>{entry.mergedNote}</Text>
-                      )}
-                    </View>
-                    {mergedStatus === 'Rescheduled' && (() => {
-                      const { time: newTime, roomCode: newRoom } = parseRescheduledInfo(entry?.rescheduledTo, entry?.rescheduledVenue);
-                      return (
-                        <View style={S.rescheduleInfoBlock}>
-                          <View style={S.rescheduleInfoHeader}>
-                            <Text style={S.rescheduleInfoTitle}>Lesson Rescheduled</Text>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                              {!!entry.rescheduleSubStatus && (
-                                <View style={[S.rescheduleBadge, { backgroundColor: (STATUS_COLORS[entry.rescheduleSubStatus] || C.textMid) + '22', borderWidth: 1, borderColor: STATUS_COLORS[entry.rescheduleSubStatus] || C.textMid }]}>
-                                  <Text style={[S.rescheduleBadgeText, { color: STATUS_COLORS[entry.rescheduleSubStatus] || C.textMid }]}>
-                                    {entry.rescheduleSubStatus === 'Confirmed' ? 'Confirmed' : entry.rescheduleSubStatus === 'Cancelled' ? 'Cancelled' : entry.rescheduleSubStatus === 'Online' ? 'Online' : entry.rescheduleSubStatus}
-                                  </Text>
+                          {!!entry.mergedNote && (
+                            <Text className="text-xs text-gray-400 italic mt-1">{entry.mergedNote}</Text>
+                          )}
+                        </View>
+
+                        {/* Status-specific blocks */}
+                        {mergedStatus === 'Rescheduled' && (() => {
+                          const { time: newTime, roomCode: newRoom } = parseRescheduledInfo(entry?.rescheduledTo, entry?.rescheduledVenue);
+                          return (
+                            <View className="mt-3 bg-amber-50 rounded-xl p-3 border border-amber-200/50">
+                              <View className="flex-row items-center justify-between mb-2">
+                                <Text className="text-xs font-bold text-amber-600">Rescheduled</Text>
+                                <View className="flex-row items-center gap-1">
+                                  {!!entry.rescheduleSubStatus && (
+                                    <View className="px-2 py-0.5 rounded-full bg-white/50">
+                                      <Text className="text-xs font-bold" style={{ color: STATUS_COLORS[entry.rescheduleSubStatus] || '#6B7280' }}>
+                                        {entry.rescheduleSubStatus}
+                                      </Text>
+                                    </View>
+                                  )}
+                                  <View className={`px-2 py-0.5 rounded-full ${entry?.reschedulePermanent ? 'bg-indigo-100' : 'bg-amber-100'}`}>
+                                    <Text className={`text-xs font-bold ${entry?.reschedulePermanent ? 'text-indigo-600' : 'text-amber-600'}`}>
+                                      {entry?.reschedulePermanent ? 'Permanent' : 'This week'}
+                                    </Text>
+                                  </View>
                                 </View>
-                              )}
-                              <View style={[S.rescheduleBadge, entry?.reschedulePermanent ? S.permanentBadge : S.temporaryBadge]}>
-                                <Text style={[S.rescheduleBadgeText, entry?.reschedulePermanent ? S.permanentText : S.temporaryText]}>
-                                  {entry?.reschedulePermanent ? 'Permanent' : 'This week only'}
-                                </Text>
+                              </View>
+                              <View className="flex-row items-center gap-3">
+                                <View className="flex-1 bg-amber-100/50 rounded-lg p-2">
+                                  <Text className="text-[10px] font-bold text-amber-700/60 uppercase tracking-wider">Was</Text>
+                                  <Text className="text-xs font-semibold text-amber-700 line-through">{entry?.time || ''}</Text>
+                                  <Text className="text-xs text-amber-600/80">{entry?.roomCode || entry?.venue || ''}</Text>
+                                </View>
+                                <Icon name="arrow-right" size={20} color="#F59E0B" />
+                                <View className="flex-1 bg-emerald-50 rounded-lg p-2">
+                                  <Text className="text-[10px] font-bold text-emerald-700/60 uppercase tracking-wider">Now</Text>
+                                  <Text className="text-xs font-bold text-emerald-600">{newTime || ''}</Text>
+                                  <Text className="text-xs font-semibold text-emerald-500">{newRoom || ''}</Text>
+                                </View>
                               </View>
                             </View>
-                          </View>
-                          <View style={S.rescheduleWasNowRow}>
-                            <View style={S.rescheduleWasCol}>
-                              <Text style={S.rescheduleWasLabel}>WAS</Text>
-                              <Text style={S.rescheduleWasTime} numberOfLines={1}>{entry?.time || ''}</Text>
-                              <Text style={S.rescheduleWasRoom} numberOfLines={1}>{entry?.mergedRoom || entry?.roomCode || entry?.venue || ''}</Text>
+                          );
+                        })()}
+
+                        {mergedStatus === 'Online' && (
+                          <View className="mt-3 bg-cyan-50 rounded-xl p-3 border border-cyan-200/50">
+                            <View className="flex-row items-center gap-2 mb-1">
+                              <Icon name="video" size={16} color="#06B6D4" />
+                              <Text className="text-xs font-bold text-cyan-600">Online Session</Text>
                             </View>
-                            <Text style={S.rescheduleArrowLec}>{'>'}</Text>
-                            <View style={S.rescheduleNowCol}>
-                              <Text style={S.rescheduleNowLabel}>NOW</Text>
-                              <Text style={S.rescheduleNowTime} numberOfLines={1}>{newTime || ''}</Text>
-                              <Text style={S.rescheduleNowRoom} numberOfLines={1}>{newRoom || ''}</Text>
-                            </View>
+                            {!!(entry.onlineStartTime || entry.onlineEndTime) && (
+                              <Text className="text-sm font-semibold text-cyan-600">
+                                {entry.onlineStartTime || ''}{entry.onlineStartTime && entry.onlineEndTime ? ' - ' : ''}{entry.onlineEndTime || ''}
+                              </Text>
+                            )}
+                            <Text className="text-xs text-cyan-500/70 mt-1">Meeting link will be shared when the session starts.</Text>
                           </View>
-                        </View>
-                      );
-                    })()}
-                    {mergedStatus === 'Online' && (
-                      <View style={S.onlineInfoBlock}>
-                        <View style={S.onlineBadge}>
-                          <Text style={S.onlineBadgeText}>Online Lecture</Text>
-                        </View>
-                        {!!(entry.onlineStartTime || entry.onlineEndTime) && (
-                          <Text style={S.onlineTimeText}>
-                            {entry.onlineStartTime || ''}{entry.onlineStartTime && entry.onlineEndTime ? ' - ' : ''}{entry.onlineEndTime || ''}
-                          </Text>
                         )}
-                        <Text style={S.onlineLinkText}>Meeting link will be shared via Online Taker when the session starts.</Text>
-                      </View>
-                    )}
-                    {mergedStatus === 'Cancelled' && !!entry?.reason && (
-                      <Text style={S.statusMetaText}>Reason: {entry.reason}</Text>
-                    )}
-                    {mergedStatus === 'Pending' && !!entry?.pendingReason && (
-                      <Text style={S.statusMetaText}>Pending: {entry.pendingReason}</Text>
-                    )}
-                    {(() => {
-                      const mergedLessonType = getLessonTypeByName(entry?.type || entry?.lessonType);
-                      return (
-                        <>
+
+                        {mergedStatus === 'Cancelled' && !!entry?.reason && (
+                          <Text className="mt-2 text-xs text-gray-500 font-medium">Reason: {entry.reason}</Text>
+                        )}
+
+                        {/* Actions */}
+                        <View className="flex-row flex-wrap items-center gap-2 mt-3">
                           <TouchableOpacity
-                            style={[S.lessonTypePill, { backgroundColor: mergedLessonType.color + '22', borderColor: mergedLessonType.color, marginTop: 8 }]}
+                            className="flex-row items-center px-3 py-1.5 rounded-full border"
+                            style={{ backgroundColor: `${getLessonTypeByName(entry?.type || entry?.lessonType).color}15`, borderColor: getLessonTypeByName(entry?.type || entry?.lessonType).color }}
                             onPress={() => setOpenLessonTypeEntryId(String(entry.id))}
-                            activeOpacity={0.75}
                           >
-                            <Text style={[S.lessonTypePillText, { color: mergedLessonType.color }]}>{mergedLessonType.label}</Text>
-                            <Text style={[S.lessonTypePillChevron, { color: mergedLessonType.color }]}>{'-'}</Text>
+                            <Text className="text-xs font-bold" style={{ color: getLessonTypeByName(entry?.type || entry?.lessonType).color }}>
+                              {getLessonTypeByName(entry?.type || entry?.lessonType).label}
+                            </Text>
                           </TouchableOpacity>
-                          {mergedLessonType.code === 'GD' && (
+
+                          {getLessonTypeByName(entry?.type || entry?.lessonType).code === 'GD' && (
                             <TouchableOpacity
-                              style={S.delegateBtn}
+                              className="px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200"
                               onPress={() => handleOpenDelegate(entry)}
-                              disabled={anyMergedUpdating}
-                              activeOpacity={0.8}
                             >
-                              <Text style={S.delegateBtnText}>Delegate Attendance</Text>
+                              <Text className="text-xs font-bold text-emerald-600">Delegate</Text>
                             </TouchableOpacity>
                           )}
-                        </>
-                      );
-                    })()}
-                    <TouchableOpacity
-                      style={S.addMakeupBtn}
-                      onPress={() => {
-                        const mergedLessonType = getLessonTypeByName(entry?.type || entry?.lessonType);
-                        setMakeupModal({ visible: true, entry });
-                        setMakeupLessonType(mergedLessonType.code || 'LEC');
-                      }}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={S.addMakeupBtnText}>+ Add Make-Up Session</Text>
-                    </TouchableOpacity>
-                  </View>
-                );
-              }
 
-              const unitCode = String(entry?.unitCode || entry?.code || '').trim();
-              const unitName = String(entry?.unitTitle || entry?.unitName || entry?.name || '').trim() || unitCode || 'Unnamed assigned unit';
-              const time = String(entry?.time || '').trim();
-              const startTime = String(entry?.startTime || '').trim();
-              const endTime = String(entry?.endTime || '').trim();
-              const timeDisplay = time || (startTime && endTime ? `${startTime} - ${endTime}` : startTime || endTime || 'Time not set');
-              const venue = String(entry?.roomCode || entry?.room_code || entry?.venueCode || entry?.venue_code || entry?.venue || entry?.lectureRoom || entry?.room || entry?.location || '').trim();
-              const status = getEffectiveStatus(entry);
-              const statusColor = STATUS_COLORS[status] || C.textDarkSec;
-              const isEntryUpdating = updatingEntryKey.startsWith(`${String(entry?.id || '').trim()}:`);
-              const lessonType = getLessonTypeByName(entry?.type || entry?.lessonType);
-
-              return (
-                <View key={`${unitCode || unitName}-${index}`} style={S.entryRow}>
-                  <View style={S.entryHeader}>
-                    <View style={S.entryHeaderLeft}>
-                      <Text style={S.unitName}>{unitName}</Text>
-                      {!!unitCode && <Text style={S.unitCode}>{unitCode}</Text>}
-                      {!!(entry.courseName || entry.department) && (
-                        <Text style={S.unitCourse} numberOfLines={1}>
-                          {[entry.courseName, entry.department].filter(Boolean).join(' - ')}
-                        </Text>
-                      )}
-                    </View>
-                    {entry.isExtraSession ? (
-                      <View style={S.makeupBadge}>
-                        <Text style={S.makeupBadgeText}>Make-Up</Text>
-                      </View>
-                    ) : (
-                      <TouchableOpacity
-                        style={[S.statusDropdownBtn, { borderColor: statusColor, backgroundColor: `${statusColor}12` }]}
-                        onPress={() => setOpenDropdownEntryId(String(entry?.id || index))}
-                        disabled={isEntryUpdating}
-                        activeOpacity={0.85}
-                      >
-                        {isEntryUpdating ? (
-                          <ActivityIndicator size="small" color={statusColor} />
-                        ) : (
-                          <>
-                            <Text style={[S.statusDropdownBtnText, { color: statusColor }]}>{status === 'Rescheduled' && entry.rescheduleSubStatus ? `${status} - ${entry.rescheduleSubStatus}` : status}</Text>
-                            <Text style={[S.statusDropdownChevron, { color: statusColor }]}>{'-'}</Text>
-                          </>
-                        )}
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                  {!entry.isExtraSession && (
-                    <TouchableOpacity
-                      style={[S.lessonTypePill, { backgroundColor: lessonType.color + '22', borderColor: lessonType.color }]}
-                      onPress={() => setOpenLessonTypeEntryId(String(entry?.id || index))}
-                      activeOpacity={0.75}
-                    >
-                      <Text style={[S.lessonTypePillText, { color: lessonType.color }]}>{lessonType.label}</Text>
-                      <Text style={[S.lessonTypePillChevron, { color: lessonType.color }]}>{'-'}</Text>
-                    </TouchableOpacity>
-                  )}
-                  {!entry.isExtraSession && lessonType.code === 'GD' && (
-                    <TouchableOpacity
-                      style={S.delegateBtn}
-                      onPress={() => handleOpenDelegate(entry)}
-                      disabled={isEntryUpdating}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={S.delegateBtnText}>  Delegate Attendance</Text>
-                    </TouchableOpacity>
-                  )}
-                  {entry.isExtraSession && !!entry.date && (
-                    <Text style={S.metaText}> {formatMakeupDate(new Date(entry.date))}</Text>
-                  )}
-                  <Text style={S.metaText}>{timeDisplay}</Text>
-                  {!!venue && <Text style={S.metaText}>Venue: {venue}</Text>}
-                  {!entry.isExtraSession && status === 'Rescheduled' && (() => {
-                    const { time: newTime, roomCode: newRoom } = parseRescheduledInfo(entry?.rescheduledTo, entry?.rescheduledVenue);
-                    return (
-                      <View style={S.rescheduleInfoBlock}>
-                        {/* Header */}
-                        <View style={S.rescheduleInfoHeader}>
-                          <Text style={S.rescheduleInfoTitle}>Lesson Rescheduled</Text>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                            {!!entry.rescheduleSubStatus && (
-                              <View style={[S.rescheduleBadge, { backgroundColor: (STATUS_COLORS[entry.rescheduleSubStatus] || C.textMid) + '22', borderWidth: 1, borderColor: STATUS_COLORS[entry.rescheduleSubStatus] || C.textMid }]}>
-                                <Text style={[S.rescheduleBadgeText, { color: STATUS_COLORS[entry.rescheduleSubStatus] || C.textMid }]}>
-                                  {entry.rescheduleSubStatus === 'Confirmed' ? 'Confirmed' : entry.rescheduleSubStatus === 'Cancelled' ? 'Cancelled' : entry.rescheduleSubStatus === 'Online' ? 'Online' : entry.rescheduleSubStatus}
-                                </Text>
-                              </View>
-                            )}
-                            <View style={[S.rescheduleBadge, entry?.reschedulePermanent ? S.permanentBadge : S.temporaryBadge]}>
-                              <Text style={[S.rescheduleBadgeText, entry?.reschedulePermanent ? S.permanentText : S.temporaryText]}>
-                                {entry?.reschedulePermanent ? ' Permanent' : ' This week only'}
-                              </Text>
-                            </View>
-                          </View>
-                        </View>
-                        {/* WAS  NOW row */}
-                        <View style={S.rescheduleWasNowRow}>
-                          <View style={S.rescheduleWasCol}>
-                            <Text style={S.rescheduleWasLabel}>WAS</Text>
-                            <Text style={S.rescheduleWasTime} numberOfLines={1}>{entry?.time || ''}</Text>
-                            <Text style={S.rescheduleWasRoom} numberOfLines={1}>{entry?.roomCode || entry?.venue || ''}</Text>
-                          </View>
-                          <Text style={S.rescheduleArrowLec}></Text>
-                          <View style={S.rescheduleNowCol}>
-                            <Text style={S.rescheduleNowLabel}>NOW</Text>
-                            <Text style={S.rescheduleNowTime} numberOfLines={1}>{newTime || ''}</Text>
-                            <Text style={S.rescheduleNowRoom} numberOfLines={1}>{newRoom || ''}</Text>
-                          </View>
+                          <TouchableOpacity
+                            className="px-3 py-1.5 rounded-lg border border-emerald-200 border-dashed"
+                            onPress={() => {
+                              const mergedLessonType = getLessonTypeByName(entry?.type || entry?.lessonType);
+                              setMakeupModal({ visible: true, entry });
+                              setMakeupLessonType(mergedLessonType.code || 'LEC');
+                            }}
+                          >
+                            <Text className="text-xs font-semibold text-emerald-600">+ Make-Up</Text>
+                          </TouchableOpacity>
                         </View>
                       </View>
                     );
-                  })()}
-                  {!entry.isExtraSession && status === 'Online' && (
-                    <View style={S.onlineInfoBlock}>
-                      <View style={S.onlineBadge}>
-                        <Text style={S.onlineBadgeText}>Online Lecture</Text>
+                  }
+
+                  // Regular entry rendering
+                  const unitCode = String(entry?.unitCode || entry?.code || '').trim();
+                  const unitName = String(entry?.unitTitle || entry?.unitName || entry?.name || '').trim() || unitCode || 'Unnamed assigned unit';
+                  const time = String(entry?.time || '').trim();
+                  const startTime = String(entry?.startTime || '').trim();
+                  const endTime = String(entry?.endTime || '').trim();
+                  const timeDisplay = time || (startTime && endTime ? `${startTime} - ${endTime}` : startTime || endTime || 'Time not set');
+                  const venue = String(entry?.roomCode || entry?.room_code || entry?.venueCode || entry?.venue_code || entry?.venue || entry?.lectureRoom || entry?.room || entry?.location || '').trim();
+                  const status = getEffectiveStatus(entry);
+                  const statusColor = STATUS_COLORS[status] || '#6B7280';
+                  const statusBg = STATUS_COLORS_LIGHT[status] || '#F3F4F6';
+                  const isEntryUpdating = updatingEntryKey.startsWith(`${String(entry?.id || '').trim()}:`);
+                  const lessonType = getLessonTypeByName(entry?.type || entry?.lessonType);
+
+                  return (
+                    <View key={`${unitCode || unitName}-${index}`} className="bg-white rounded-2xl p-4 mb-3 shadow-sm border border-gray-100/80">
+                      {/* Header */}
+                      <View className="flex-row items-start justify-between mb-2">
+                        <View className="flex-1 mr-3">
+                          <Text className="text-base font-bold text-gray-800 tracking-tight">{unitName}</Text>
+                          {!!unitCode && (
+                            <Text className="text-xs font-bold text-indigo-500 mt-0.5">{unitCode}</Text>
+                          )}
+                          {!!(entry.courseName || entry.department) && (
+                            <Text className="text-xs text-gray-500 mt-0.5" numberOfLines={1}>
+                              {[entry.courseName, entry.department].filter(Boolean).join(' - ')}
+                            </Text>
+                          )}
+                        </View>
+                        {entry.isExtraSession ? (
+                          <View className="bg-emerald-100 px-3 py-1 rounded-full">
+                            <Text className="text-xs font-bold text-emerald-600">Make-Up</Text>
+                          </View>
+                        ) : (
+                          <TouchableOpacity
+                            className="flex-row items-center px-3 py-1.5 rounded-lg border"
+                            style={{ borderColor: statusColor, backgroundColor: statusBg }}
+                            onPress={() => setOpenDropdownEntryId(String(entry?.id || index))}
+                            disabled={isEntryUpdating}
+                          >
+                            {isEntryUpdating ? (
+                              <ActivityIndicator size="small" color={statusColor} />
+                            ) : (
+                              <Text className="text-xs font-bold" style={{ color: statusColor }}>
+                                {status === 'Rescheduled' && entry.rescheduleSubStatus 
+                                  ? `${status} - ${entry.rescheduleSubStatus}` 
+                                  : status}
+                              </Text>
+                            )}
+                          </TouchableOpacity>
+                        )}
                       </View>
-                      {!!(entry.onlineStartTime || entry.onlineEndTime) && (
-                        <Text style={S.onlineTimeText}>
-                          {entry.onlineStartTime || ''}{entry.onlineStartTime && entry.onlineEndTime ? ' - ' : ''}{entry.onlineEndTime || ''}
+
+                      {/* Lesson Type */}
+                      {!entry.isExtraSession && (
+                        <TouchableOpacity
+                          className="self-start flex-row items-center px-3 py-1 rounded-full border mb-2"
+                          style={{ backgroundColor: `${lessonType.color}15`, borderColor: lessonType.color }}
+                          onPress={() => setOpenLessonTypeEntryId(String(entry?.id || index))}
+                        >
+                          <Text className="text-xs font-bold" style={{ color: lessonType.color }}>
+                            {lessonType.label}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+
+                      {/* Meta Info */}
+                      {entry.isExtraSession && !!entry.date && (
+                        <Text className="text-xs text-gray-500 mt-0.5">
+                          <Icon name="calendar" size={12} color="#6B7280" /> {formatMakeupDate(new Date(entry.date))}
                         </Text>
                       )}
-                      <Text style={S.onlineLinkText}>Meeting link will be shared via Online Taker when the session starts.</Text>
-                    </View>
-                  )}
-                  {!entry.isExtraSession && status === 'Cancelled' && !!entry?.reason && (
-                    <Text style={S.statusMetaText}>Reason: {entry.reason}</Text>
-                  )}
-                  {!entry.isExtraSession && status === 'Pending' && !!entry?.pendingReason && (
-                    <Text style={S.statusMetaText}>Pending: {entry.pendingReason}</Text>
-                  )}
-                  {!entry.isExtraSession && (
-                    <TouchableOpacity
-                      style={S.addMakeupBtn}
-                      onPress={() => {
-                        setMakeupModal({ visible: true, entry });
-                        setMakeupLessonType(lessonType.code || 'LEC');
-                      }}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={S.addMakeupBtnText}>+ Add Make-Up Session</Text>
-                    </TouchableOpacity>
-                  )}
-                  {!entry.isExtraSession && !!mergeCandidatesMap[String(entry.id)] && !entry.isMerged && (
-                    <TouchableOpacity
-                      style={S.mergeLessonsBtn}
-                      onPress={() => handleOpenMerge(entry)}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={S.mergeLessonsBtnText}>Merge with Other Classes</Text>
-                    </TouchableOpacity>
-                  )}
-                  {!entry.isExtraSession && !!entry.isMerged && (
-                    <View style={S.mergedBadge}>
-                      <View style={S.mergedBadgeRow}>
-                        <Text style={S.mergedBadgeText}>Merged - Room {entry.mergedRoom}</Text>
-                        <TouchableOpacity
-                          style={S.unmergeBtn}
-                          onPress={() => handleUnmerge(entry)}
-                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                          activeOpacity={0.7}
-                        >
-                          <Text style={S.unmergeBtnText}>Unmerge</Text>
-                        </TouchableOpacity>
-                      </View>
-                      {!!entry.mergedNote && <Text style={S.mergedNoteText}>{entry.mergedNote}</Text>}
-                    </View>
-                  )}
-                  {entry.isExtraSession && (
-                    <TouchableOpacity
-                      style={S.deleteExtraBtn}
-                      onPress={() => {
-                        Alert.alert(
-                          'Remove Make-Up Session',
-                          'This will permanently remove this make-up session. Students will no longer see it.',
-                          [
-                            { text: 'Cancel', style: 'cancel' },
-                            {
-                              text: 'Remove',
-                              style: 'destructive',
-                              onPress: async () => {
-                                try {
-                                  const session = await getLecturerSession();
-                                  await deleteExtraSession(entry.sessionId, session.token);
-                                  setEntries((prev) => prev.filter((e) => e.id !== entry.id));
-                                } catch (err) {
-                                  Alert.alert('Error', err.message || 'Could not remove session.');
-                                }
-                              },
-                            },
-                          ],
+                      <Text className="text-xs text-gray-500 mt-0.5">
+                        <Icon name="clock-outline" size={12} color="#6B7280" /> {timeDisplay}
+                      </Text>
+                      {!!venue && (
+                        <Text className="text-xs text-gray-500 mt-0.5">
+                          <Icon name="map-marker-outline" size={12} color="#6B7280" /> {venue}
+                        </Text>
+                      )}
+
+                      {/* Reschedule Block */}
+                      {!entry.isExtraSession && status === 'Rescheduled' && (() => {
+                        const { time: newTime, roomCode: newRoom } = parseRescheduledInfo(entry?.rescheduledTo, entry?.rescheduledVenue);
+                        return (
+                          <View className="mt-3 bg-amber-50 rounded-xl p-3 border border-amber-200/50">
+                            <View className="flex-row items-center justify-between mb-2">
+                              <Text className="text-xs font-bold text-amber-600">Rescheduled</Text>
+                              <View className="flex-row items-center gap-1">
+                                {!!entry.rescheduleSubStatus && (
+                                  <View className="px-2 py-0.5 rounded-full bg-white/50">
+                                    <Text className="text-xs font-bold" style={{ color: STATUS_COLORS[entry.rescheduleSubStatus] || '#6B7280' }}>
+                                      {entry.rescheduleSubStatus}
+                                    </Text>
+                                  </View>
+                                )}
+                                <View className={`px-2 py-0.5 rounded-full ${entry?.reschedulePermanent ? 'bg-indigo-100' : 'bg-amber-100'}`}>
+                                  <Text className={`text-xs font-bold ${entry?.reschedulePermanent ? 'text-indigo-600' : 'text-amber-600'}`}>
+                                    {entry?.reschedulePermanent ? 'Permanent' : 'This week'}
+                                  </Text>
+                                </View>
+                              </View>
+                            </View>
+                            <View className="flex-row items-center gap-3">
+                              <View className="flex-1 bg-amber-100/50 rounded-lg p-2">
+                                <Text className="text-[10px] font-bold text-amber-700/60 uppercase tracking-wider">Was</Text>
+                                <Text className="text-xs font-semibold text-amber-700 line-through">{entry?.time || ''}</Text>
+                                <Text className="text-xs text-amber-600/80">{entry?.roomCode || entry?.venue || ''}</Text>
+                              </View>
+                              <Icon name="arrow-right" size={20} color="#F59E0B" />
+                              <View className="flex-1 bg-emerald-50 rounded-lg p-2">
+                                <Text className="text-[10px] font-bold text-emerald-700/60 uppercase tracking-wider">Now</Text>
+                                <Text className="text-xs font-bold text-emerald-600">{newTime || ''}</Text>
+                                <Text className="text-xs font-semibold text-emerald-500">{newRoom || ''}</Text>
+                              </View>
+                            </View>
+                          </View>
                         );
-                      }}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={S.deleteExtraBtnText}>Remove Session</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              );
-            })}
-          </View>
-          );
-        })
-      )}
+                      })()}
+
+                      {/* Online Block */}
+                      {!entry.isExtraSession && status === 'Online' && (
+                        <View className="mt-3 bg-cyan-50 rounded-xl p-3 border border-cyan-200/50">
+                          <View className="flex-row items-center gap-2 mb-1">
+                            <Icon name="video" size={16} color="#06B6D4" />
+                            <Text className="text-xs font-bold text-cyan-600">Online Session</Text>
+                          </View>
+                          {!!(entry.onlineStartTime || entry.onlineEndTime) && (
+                            <Text className="text-sm font-semibold text-cyan-600">
+                              {entry.onlineStartTime || ''}{entry.onlineStartTime && entry.onlineEndTime ? ' - ' : ''}{entry.onlineEndTime || ''}
+                            </Text>
+                          )}
+                          <Text className="text-xs text-cyan-500/70 mt-1">Meeting link will be shared when the session starts.</Text>
+                        </View>
+                      )}
+
+                      {/* Cancelled Reason */}
+                      {!entry.isExtraSession && status === 'Cancelled' && !!entry?.reason && (
+                        <Text className="mt-2 text-xs text-gray-500 font-medium">
+                          <Icon name="info-outline" size={12} color="#6B7280" /> Reason: {entry.reason}
+                        </Text>
+                      )}
+
+                      {/* Pending Reason */}
+                      {!entry.isExtraSession && status === 'Pending' && !!entry?.pendingReason && (
+                        <Text className="mt-2 text-xs text-gray-500 font-medium">
+                          <Icon name="info-outline" size={12} color="#6B7280" /> {entry.pendingReason}
+                        </Text>
+                      )}
+
+                      {/* Actions */}
+                      <View className="flex-row flex-wrap items-center gap-2 mt-3 pt-3 border-t border-gray-100">
+                        {!entry.isExtraSession && (
+                          <TouchableOpacity
+                            className="px-3 py-1.5 rounded-lg border border-emerald-200 border-dashed"
+                            onPress={() => {
+                              setMakeupModal({ visible: true, entry });
+                              setMakeupLessonType(lessonType.code || 'LEC');
+                            }}
+                          >
+                            <Text className="text-xs font-semibold text-emerald-600">+ Make-Up Session</Text>
+                          </TouchableOpacity>
+                        )}
+
+                        {!entry.isExtraSession && !entry.isMerged && !!mergeCandidatesMap[String(entry.id)] && (
+                          <TouchableOpacity
+                            className="px-3 py-1.5 rounded-lg bg-indigo-50 border border-indigo-200"
+                            onPress={() => handleOpenMerge(entry)}
+                          >
+                            <Text className="text-xs font-semibold text-indigo-600">Merge Classes</Text>
+                          </TouchableOpacity>
+                        )}
+
+                        {!entry.isExtraSession && entry.isMerged && (
+                          <View className="flex-row items-center gap-2 bg-indigo-50 rounded-lg px-3 py-1.5 border border-indigo-200">
+                            <Icon name="layers" size={14} color="#6366F1" />
+                            <Text className="text-xs font-medium text-indigo-600 flex-1">Merged - Room {entry.mergedRoom}</Text>
+                            <TouchableOpacity
+                              className="px-2 py-0.5 rounded bg-red-50 border border-red-200"
+                              onPress={() => handleUnmerge(entry)}
+                            >
+                              <Text className="text-xs font-semibold text-red-500">Unmerge</Text>
+                            </TouchableOpacity>
+                          </View>
+                        )}
+
+                        {!entry.isExtraSession && lessonType.code === 'GD' && (
+                          <TouchableOpacity
+                            className="px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200"
+                            onPress={() => handleOpenDelegate(entry)}
+                          >
+                            <Text className="text-xs font-bold text-emerald-600">Delegate</Text>
+                          </TouchableOpacity>
+                        )}
+
+                        {entry.isExtraSession && (
+                          <TouchableOpacity
+                            className="px-3 py-1.5 rounded-lg bg-red-50 border border-red-200"
+                            onPress={() => {
+                              Alert.alert(
+                                'Remove Make-Up Session',
+                                'This will permanently remove this make-up session.',
+                                [
+                                  { text: 'Cancel', style: 'cancel' },
+                                  {
+                                    text: 'Remove',
+                                    style: 'destructive',
+                                    onPress: async () => {
+                                      try {
+                                        const session = await getLecturerSession();
+                                        await deleteExtraSession(entry.sessionId, session.token);
+                                        setEntries((prev) => prev.filter((e) => e.id !== entry.id));
+                                      } catch (err) {
+                                        Alert.alert('Error', err.message || 'Could not remove session.');
+                                      }
+                                    },
+                                  },
+                                ],
+                              );
+                            }}
+                          >
+                            <Text className="text-xs font-semibold text-red-500">Remove</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            );
+          })
+        )}
+      </ScrollView>
+
+      {/* Modals (maintained from original) */}
       <Modal
         visible={!!openLessonTypeEntryId}
         transparent
         animationType="fade"
         onRequestClose={() => setOpenLessonTypeEntryId('')}
       >
-        <Pressable style={S.dropdownOverlay} onPress={() => setOpenLessonTypeEntryId('')}>
-          <View style={S.dropdownSheet}>
-            <Text style={S.dropdownSheetTitle}>Set Lesson Type</Text>
+        <Pressable className="flex-1 bg-black/50 justify-end" onPress={() => setOpenLessonTypeEntryId('')}>
+          <View className="bg-white rounded-t-3xl px-5 pt-5 pb-8">
+            <View className="w-12 h-1 bg-gray-300 rounded-full self-center mb-4" />
+            <Text className="text-lg font-bold text-gray-800 mb-1">Set Lesson Type</Text>
             {LESSON_TYPES.map((lt) => {
               const activeEntry = entries.find((e) => String(e?.id || '') === openLessonTypeEntryId);
               const currentCode = getLessonTypeByName(activeEntry?.type || activeEntry?.lessonType).code;
@@ -2084,18 +1982,20 @@ export default function AssignedTimetableScreen() {
               return (
                 <TouchableOpacity
                   key={lt.code}
-                  style={[S.dropdownOption, isSelected && { backgroundColor: `${lt.color}15`, borderColor: lt.color }]}
+                  className={`flex-row items-center gap-3 py-3 px-4 rounded-xl border mb-2 ${isSelected ? 'border' : 'border-gray-100'}`}
+                  style={isSelected ? { backgroundColor: `${lt.color}15`, borderColor: lt.color } : { backgroundColor: '#F9FAFB' }}
                   onPress={() => {
                     setOpenLessonTypeEntryId('');
                     if (!activeEntry) return;
                     handleLessonTypeChange(activeEntry, lt.code);
                   }}
-                  activeOpacity={0.8}
                 >
-                  <View style={[S.dropdownOptionDot, { backgroundColor: lt.color }]} />
-                  <Text style={[S.dropdownOptionText, isSelected && { color: lt.color, fontWeight: '700' }]}>{lt.label}</Text>
-                  <Text style={S.lessonTypeCodeLabel}>{lt.code}</Text>
-                  {isSelected && <Text style={[S.dropdownOptionCheck, { color: lt.color }]}></Text>}
+                  <View className="w-3 h-3 rounded-sm" style={{ backgroundColor: lt.color }} />
+                  <Text className={`flex-1 text-base font-semibold ${isSelected ? 'font-bold' : 'text-gray-700'}`} style={isSelected ? { color: lt.color } : undefined}>
+                    {lt.label}
+                  </Text>
+                  <Text className="text-sm font-semibold text-gray-400">{lt.code}</Text>
+                  {isSelected && <Icon name="check" size={18} color={lt.color} />}
                 </TouchableOpacity>
               );
             })}
@@ -2109,12 +2009,14 @@ export default function AssignedTimetableScreen() {
         animationType="fade"
         onRequestClose={() => setOpenDropdownEntryId('')}
       >
-        <Pressable style={S.dropdownOverlay} onPress={() => setOpenDropdownEntryId('')}>
-          <View style={S.dropdownSheet}>
-            <Text style={S.dropdownSheetTitle}>Set Lesson Status</Text>
-            <Text style={S.dropdownSheetSubtitle}>Pending is set automatically until you choose a status below.</Text>
+        <Pressable className="flex-1 bg-black/50 justify-end" onPress={() => setOpenDropdownEntryId('')}>
+          <View className="bg-white rounded-t-3xl px-5 pt-5 pb-8">
+            <View className="w-12 h-1 bg-gray-300 rounded-full self-center mb-4" />
+            <Text className="text-lg font-bold text-gray-800 mb-1">Set Lesson Status</Text>
+            <Text className="text-sm text-gray-500 mb-4">Pending is set automatically until you choose a status below.</Text>
             {LESSON_STATUS_OPTIONS.map((option) => {
-              const optionColor = STATUS_COLORS[option] || C.textDarkSec;
+              const optionColor = STATUS_COLORS[option] || '#6B7280';
+              const optionBg = STATUS_COLORS_LIGHT[option] || '#F3F4F6';
               const activeEntry = entries.find((e) => String(e?.id || '') === openDropdownEntryId);
               const isSelected = option === getEffectiveStatus(activeEntry);
               const actionKey = `${openDropdownEntryId}:${option}`;
@@ -2122,13 +2024,11 @@ export default function AssignedTimetableScreen() {
               return (
                 <TouchableOpacity
                   key={option}
-                  style={[
-                    S.dropdownOption,
-                    isSelected && { backgroundColor: `${optionColor}15`, borderColor: optionColor },
-                  ]}
+                  className={`flex-row items-center gap-3 py-3 px-4 rounded-xl border mb-2 ${isSelected ? 'border' : 'border-gray-100'}`}
+                  style={isSelected ? { backgroundColor: `${optionColor}15`, borderColor: optionColor } : { backgroundColor: '#F9FAFB' }}
                   onPress={() => {
                     setOpenDropdownEntryId('');
-                    if (!activeEntry) { return; }
+                    if (!activeEntry) return;
                     if (option === 'Cancelled') {
                       setCancelReason('');
                       setCancelModal({ visible: true, entry: activeEntry });
@@ -2158,9 +2058,9 @@ export default function AssignedTimetableScreen() {
                       handleStatusChange(activeEntry, option);
                       if (option === 'Confirmed') {
                         const unitCode = String(activeEntry?.unitCode || activeEntry?.code || '').trim();
-                        const day      = String(activeEntry?.day || '').trim();
-                        const time     = String(activeEntry?.startTime || activeEntry?.time || '').trim();
-                        const venue    = String(activeEntry?.venue || activeEntry?.lectureRoom || activeEntry?.roomCode || '').trim();
+                        const day = String(activeEntry?.day || '').trim();
+                        const time = String(activeEntry?.startTime || activeEntry?.time || '').trim();
+                        const venue = String(activeEntry?.venue || activeEntry?.lectureRoom || activeEntry?.roomCode || '').trim();
                         const venueLabel = venue ? `, Room ${venue}` : '';
                         sendNotification({
                           type: 'LESSON_CONFIRMED',
@@ -2178,17 +2078,16 @@ export default function AssignedTimetableScreen() {
                       }
                     }
                   }}
-                  activeOpacity={0.8}
                 >
                   {isUpdatingThisAction ? (
                     <ActivityIndicator size="small" color={optionColor} />
                   ) : (
                     <>
-                      <View style={[S.dropdownOptionDot, { backgroundColor: optionColor }]} />
-                      <Text style={[S.dropdownOptionText, isSelected && { color: optionColor, fontWeight: '700' }]}>
+                      <View className="w-3 h-3 rounded-sm" style={{ backgroundColor: optionColor }} />
+                      <Text className={`flex-1 text-base font-semibold ${isSelected ? 'font-bold' : 'text-gray-700'}`} style={isSelected ? { color: optionColor } : undefined}>
                         {STATUS_DIALOG_LABELS[option] || option}
                       </Text>
-                      {isSelected && <Text style={[S.dropdownOptionCheck, { color: optionColor }]}></Text>}
+                      {isSelected && <Icon name="check" size={18} color={optionColor} />}
                     </>
                   )}
                 </TouchableOpacity>
@@ -2198,173 +2097,169 @@ export default function AssignedTimetableScreen() {
         </Pressable>
       </Modal>
 
-      {/* Cancel Lecture Modal */}
+      {/* Cancel Modal */}
       <Modal
         visible={cancelModal.visible}
         transparent
         animationType="slide"
         onRequestClose={() => { setCancelModal({ visible: false, entry: null }); setCancelReason(''); }}
       >
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-          <Pressable style={S.modalOverlay} onPress={() => { setCancelModal({ visible: false, entry: null }); setCancelReason(''); }}>
-            <Pressable onPress={() => {}} style={S.actionSheet}>
-              <View style={S.actionSheetHandle} />
-              <Text style={S.actionSheetTitle}>Cancel Lecture</Text>
-              <Text style={S.actionSheetSubtitle}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1">
+          <Pressable className="flex-1 bg-black/50 justify-end" onPress={() => { setCancelModal({ visible: false, entry: null }); setCancelReason(''); }}>
+            <Pressable onPress={() => {}} className="bg-white rounded-t-3xl px-5 pt-5 pb-8">
+              <View className="w-12 h-1 bg-gray-300 rounded-full self-center mb-4" />
+              <Text className="text-lg font-bold text-gray-800 mb-1">Cancel Lecture</Text>
+              <Text className="text-sm text-gray-500 mb-4">
                 Please provide a reason for cancelling this lecture. Students will be notified.
               </Text>
               <TextInput
-                style={S.reasonInput}
+                className="border border-gray-200 rounded-xl p-3 text-gray-800 bg-gray-50 min-h-[100px] text-base"
                 placeholder="e.g. Lecturer is unwell, room unavailable..."
-                placeholderTextColor="#94A3B8"
+                placeholderTextColor="#9CA3AF"
                 multiline
                 numberOfLines={4}
                 value={cancelReason}
                 onChangeText={setCancelReason}
                 maxLength={300}
               />
-              <Text style={S.charCount}>{cancelReason.length}/300</Text>
+              <Text className="text-xs text-gray-400 text-right mt-1">{cancelReason.length}/300</Text>
               <TouchableOpacity
-                style={[S.confirmBtn, { backgroundColor: '#B91C1C' }]}
+                className="bg-red-500 rounded-xl py-3.5 items-center mt-3"
                 onPress={handleCancelConfirm}
-                activeOpacity={0.85}
               >
-                <Text style={S.confirmBtnText}>Confirm Cancellation</Text>
+                <Text className="text-white text-base font-bold">Confirm Cancellation</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={S.backBtn}
+                className="border border-gray-200 rounded-xl py-3 items-center mt-2"
                 onPress={() => { setCancelModal({ visible: false, entry: null }); setCancelReason(''); }}
-                activeOpacity={0.85}
               >
-                <Text style={S.backBtnText}>Go Back</Text>
+                <Text className="text-gray-600 text-base font-semibold">Go Back</Text>
               </TouchableOpacity>
             </Pressable>
           </Pressable>
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Delegate GD Session Modal */}
+      {/* Delegate Modal */}
       <Modal
         visible={delegateModal.visible}
         transparent
         animationType="slide"
         onRequestClose={() => setDelegateModal({ visible: false, entry: null })}
       >
-        <Pressable style={S.modalOverlay} onPress={() => setDelegateModal({ visible: false, entry: null })}>
-          <Pressable onPress={() => {}} style={S.actionSheet}>
-            <View style={S.actionSheetHandle} />
-            <Text style={S.actionSheetTitle}>Delegate Group Discussion</Text>
-            <Text style={S.actionSheetSubtitle}>
+        <Pressable className="flex-1 bg-black/50 justify-end" onPress={() => setDelegateModal({ visible: false, entry: null })}>
+          <Pressable onPress={() => {}} className="bg-white rounded-t-3xl px-5 pt-5 pb-8">
+            <View className="w-12 h-1 bg-gray-300 rounded-full self-center mb-4" />
+            <Text className="text-lg font-bold text-gray-800 mb-1">Delegate Group Discussion</Text>
+            <Text className="text-sm text-gray-500 mb-4">
               Each group leader will receive a notification to host BLE attendance for their group.
             </Text>
             {loadingGroups ? (
-              <ActivityIndicator color="#10B981" style={{ marginVertical: 20 }} />
+              <ActivityIndicator color="#10B981" className="py-6" />
             ) : delegateGroups.length === 0 ? (
-              <View style={S.noGroupsWrap}>
-                <Text style={S.noGroupsText}>No groups found for this unit.</Text>
-                <Text style={S.noGroupsHint}>Create groups first from the Groups screen.</Text>
+              <View className="items-center py-4">
+                <Text className="text-base font-semibold text-gray-600">No groups found for this unit.</Text>
+                <Text className="mt-1 text-sm text-gray-400">Create groups first from the Groups screen.</Text>
               </View>
             ) : (
               <>
-                <Text style={S.fieldLabel}>Groups ({delegateGroups.length})</Text>
+                <Text className="text-base font-semibold text-gray-600 mb-2 mt-1">Groups ({delegateGroups.length})</Text>
                 {delegateGroups.map((g) => {
                   const num = g.groupNumber ?? g.number ?? '?';
                   const name = g.name || `Group ${num}`;
                   const leader = g.leaderName || g.leader?.name || g.leader?.fullName || 'No leader assigned';
                   return (
-                    <View key={String(g.id || g._id || num)} style={S.delegateGroupRow}>
-                      <Text style={S.delegateGroupName}>{name}</Text>
-                      <Text style={S.delegateGroupLeader}>Leader: {leader}</Text>
+                    <View key={String(g.id || g._id || num)} className="border border-emerald-200 rounded-xl p-3 mb-2 bg-emerald-50/50">
+                      <Text className="text-base font-bold text-emerald-600">{name}</Text>
+                      <Text className="text-sm text-emerald-500 mt-0.5">Leader: {leader}</Text>
                     </View>
                   );
                 })}
               </>
             )}
-            {!!delegateError && <Text style={S.delegateError}>{delegateError}</Text>}
+            {!!delegateError && <Text className="text-red-500 text-sm mt-2 mb-1">{delegateError}</Text>}
             {delegateGroups.length > 0 && (
               <TouchableOpacity
-                style={[S.confirmBtn, { backgroundColor: C.success, marginTop: 12 }, (delegating || loadingGroups) && { opacity: 0.6 }]}
+                className="bg-emerald-500 rounded-xl py-3.5 items-center mt-3"
+                style={{ opacity: (delegating || loadingGroups) ? 0.6 : 1 }}
                 onPress={handleConfirmDelegate}
                 disabled={delegating || loadingGroups}
-                activeOpacity={0.85}
               >
                 {delegating ? (
                   <ActivityIndicator color="#FFF" size="small" />
                 ) : (
-                  <Text style={S.confirmBtnText}>Notify All Leaders</Text>
+                  <Text className="text-white text-base font-bold">Notify All Leaders</Text>
                 )}
               </TouchableOpacity>
             )}
             <TouchableOpacity
-              style={S.backBtn}
+              className="border border-gray-200 rounded-xl py-3 items-center mt-2"
               onPress={() => setDelegateModal({ visible: false, entry: null })}
-              activeOpacity={0.85}
             >
-              <Text style={S.backBtnText}>Cancel</Text>
+              <Text className="text-gray-600 text-base font-semibold">Cancel</Text>
             </TouchableOpacity>
           </Pressable>
         </Pressable>
       </Modal>
 
-      {/* Reschedule Lecture Modal */}
+      {/* Reschedule Modal */}
       <Modal
         visible={rescheduleModal.visible}
         transparent
         animationType="slide"
         onRequestClose={closeRescheduleModal}
       >
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-          <Pressable style={S.modalOverlay} onPress={closeRescheduleModal}>
-            <Pressable onPress={() => {}} style={S.actionSheet}>
-              <View style={S.actionSheetHandle} />
-              <Text style={S.actionSheetTitle}>Reschedule Lecture</Text>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1">
+          <Pressable className="flex-1 bg-black/50 justify-end" onPress={closeRescheduleModal}>
+            <Pressable onPress={() => {}} className="bg-white rounded-t-3xl px-5 pt-5 pb-8">
+              <View className="w-12 h-1 bg-gray-300 rounded-full self-center mb-4" />
+              <Text className="text-lg font-bold text-gray-800 mb-4">Reschedule Lecture</Text>
 
               {/* Step indicator */}
-              <View style={S.stepRow}>
-                <View style={[S.stepDot, rescheduleStep >= 1 && S.stepDotActive]} />
-                <View style={[S.stepLine, rescheduleStep >= 2 && S.stepLineActive]} />
-                <View style={[S.stepDot, rescheduleStep >= 2 && S.stepDotActive]} />
+              <View className="flex-row items-center justify-center mb-5">
+                <View className={`w-3 h-3 rounded-full ${rescheduleStep >= 1 ? 'bg-indigo-500' : 'bg-gray-200'}`} />
+                <View className={`w-12 h-0.5 mx-1 ${rescheduleStep >= 2 ? 'bg-indigo-500' : 'bg-gray-200'}`} />
+                <View className={`w-3 h-3 rounded-full ${rescheduleStep >= 2 ? 'bg-indigo-500' : 'bg-gray-200'}`} />
               </View>
 
               {rescheduleStep === 1 ? (
                 <>
-                  {/*  Step 1: Day, time & type  */}
-                  <View style={S.rescheduleTypeRow}>
+                  <View className="flex-row gap-2 mb-3">
                     <TouchableOpacity
-                      style={[S.rescheduleTypeBtn, rescheduleType === 'temporary' && S.rescheduleTypeBtnActive]}
+                      className={`flex-1 rounded-xl py-2.5 items-center border ${rescheduleType === 'temporary' ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 bg-gray-50'}`}
                       onPress={() => setRescheduleType('temporary')}
                     >
-                      <Text style={[S.rescheduleTypeBtnText, rescheduleType === 'temporary' && S.rescheduleTypeBtnTextActive]}>Temporary</Text>
+                      <Text className={`text-base font-semibold ${rescheduleType === 'temporary' ? 'text-indigo-600' : 'text-gray-600'}`}>Temporary</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={[S.rescheduleTypeBtn, rescheduleType === 'permanent' && S.rescheduleTypeBtnActive]}
+                      className={`flex-1 rounded-xl py-2.5 items-center border ${rescheduleType === 'permanent' ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 bg-gray-50'}`}
                       onPress={() => setRescheduleType('permanent')}
                     >
-                      <Text style={[S.rescheduleTypeBtnText, rescheduleType === 'permanent' && S.rescheduleTypeBtnTextActive]}>Permanent</Text>
+                      <Text className={`text-base font-semibold ${rescheduleType === 'permanent' ? 'text-indigo-600' : 'text-gray-600'}`}>Permanent</Text>
                     </TouchableOpacity>
                   </View>
-                  <Text style={S.rescheduleTypeNote}>
+                  <Text className="text-sm text-gray-500 mb-4">
                     {rescheduleType === 'temporary'
                       ? 'Applies this week only. Reverts to original slot on Friday night.'
                       : 'Applies for the rest of the semester.'}
                   </Text>
 
-                  <Text style={S.fieldLabel}>New Day</Text>
-                  <View style={S.dayPickerRow}>
+                  <Text className="text-base font-semibold text-gray-700 mb-1.5">New Day</Text>
+                  <View className="flex-row flex-wrap gap-1.5 mb-3">
                     {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((d) => (
                       <TouchableOpacity
                         key={d}
-                        style={[S.dayPill, rescheduleDay === d && S.dayPillActive]}
+                        className={`rounded-lg py-1.5 px-3 border ${rescheduleDay === d ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 bg-gray-50'}`}
                         onPress={() => setRescheduleDay(d)}
                       >
-                        <Text style={[S.dayPillText, rescheduleDay === d && S.dayPillTextActive]}>{d.slice(0, 3)}</Text>
+                        <Text className={`text-sm font-semibold ${rescheduleDay === d ? 'text-indigo-600' : 'text-gray-600'}`}>{d.slice(0, 3)}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>
 
-                  <Text style={S.fieldLabel}>Start Time</Text>
-                  <TouchableOpacity style={S.timeInput} onPress={() => setShowStartPicker(true)} activeOpacity={0.8}>
-                    <Text style={rescheduleStartTime ? S.timeInputText : S.timeInputPlaceholder}>
+                  <Text className="text-base font-semibold text-gray-700 mb-1.5">Start Time</Text>
+                  <TouchableOpacity className="border border-gray-200 rounded-xl py-3 px-4 bg-gray-50 mb-3" onPress={() => setShowStartPicker(true)}>
+                    <Text className={rescheduleStartTime ? 'text-base font-semibold text-gray-800' : 'text-base text-gray-400'}>
                       {rescheduleStartTime ? formatTime(rescheduleStartTime) : 'Tap to select start time'}
                     </Text>
                   </TouchableOpacity>
@@ -2381,9 +2276,9 @@ export default function AssignedTimetableScreen() {
                     />
                   )}
 
-                  <Text style={S.fieldLabel}>End Time</Text>
-                  <TouchableOpacity style={S.timeInput} onPress={() => setShowEndPicker(true)} activeOpacity={0.8}>
-                    <Text style={rescheduleEndTime ? S.timeInputText : S.timeInputPlaceholder}>
+                  <Text className="text-base font-semibold text-gray-700 mb-1.5">End Time</Text>
+                  <TouchableOpacity className="border border-gray-200 rounded-xl py-3 px-4 bg-gray-50 mb-3" onPress={() => setShowEndPicker(true)}>
+                    <Text className={rescheduleEndTime ? 'text-base font-semibold text-gray-800' : 'text-base text-gray-400'}>
                       {rescheduleEndTime ? formatTime(rescheduleEndTime) : 'Tap to select end time'}
                     </Text>
                   </TouchableOpacity>
@@ -2400,96 +2295,88 @@ export default function AssignedTimetableScreen() {
                     />
                   )}
 
-                  {!!roomSearchError && <Text style={S.roomSearchError}>{roomSearchError}</Text>}
+                  {!!roomSearchError && <Text className="text-red-500 text-sm mt-2 text-center">{roomSearchError}</Text>}
 
                   <TouchableOpacity
-                    style={[S.confirmBtn, { backgroundColor: C.purpleDk, marginTop: 12 }]}
+                    className="bg-indigo-500 rounded-xl py-3.5 items-center mt-3"
                     onPress={handleFindRooms}
                     disabled={searchingRooms}
-                    activeOpacity={0.85}
                   >
                     {searchingRooms ? (
                       <ActivityIndicator color="#FFF" size="small" />
                     ) : (
-                      <Text style={S.confirmBtnText}>Find Available Rooms</Text>
+                      <Text className="text-white text-base font-bold">Find Available Rooms</Text>
                     )}
                   </TouchableOpacity>
-                  <TouchableOpacity style={S.backBtn} onPress={closeRescheduleModal} activeOpacity={0.85}>
-                    <Text style={S.backBtnText}>Cancel</Text>
+                  <TouchableOpacity className="border border-gray-200 rounded-xl py-3 items-center mt-2" onPress={closeRescheduleModal}>
+                    <Text className="text-gray-600 text-base font-semibold">Cancel</Text>
                   </TouchableOpacity>
                 </>
               ) : (
                 <>
-                  {/*  Step 2: Room selection  */}
-                  <Text style={S.roomSummaryText}>
+                  <Text className="text-lg font-semibold text-indigo-600 mb-3 text-center">
                     {rescheduleDay} - {formatTime(rescheduleStartTime)} to {formatTime(rescheduleEndTime)}
                   </Text>
 
                   {availableRooms.length === 0 ? (
-                    <View style={S.noRoomsWrap}>
-                      <Text style={S.noRoomsText}>No rooms available for this time slot.</Text>
-                      <Text style={S.noRoomsHint}>Try a different day or time window.</Text>
+                    <View className="items-center py-6">
+                      <Text className="text-base font-semibold text-gray-600">No rooms available for this time slot.</Text>
+                      <Text className="mt-1 text-sm text-gray-400">Try a different day or time window.</Text>
                     </View>
                   ) : (
                     <>
-                    <TextInput
-                      style={S.roomSearchInput}
-                      placeholder="Search rooms..."
-                      placeholderTextColor="#94A3B8"
-                      value={roomFilterQuery}
-                      onChangeText={setRoomFilterQuery}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                    />
-                    <FlatList
-                      data={availableRooms.filter((r) => {
-                        if (!roomFilterQuery.trim()) return true;
-                        const q = roomFilterQuery.trim().toLowerCase();
-                        const code = (r.roomCode || r.room_code || r.name || r.code || '').toLowerCase();
-                        const bldg = (r.building || r.block || '').toLowerCase();
-                        return code.includes(q) || bldg.includes(q);
-                      })}
-                      keyExtractor={(item) => String(item.id || item._id || item.roomCode || item.name)}
-                      style={S.roomList}
-                      renderItem={({ item }) => {
-                        const code = item.roomCode || item.room_code || item.name || item.code || 'Unknown';
-                        const capacity = item.capacity || item.seats || null;
-                        const building = item.building || item.block || '';
-                        const isSelected = (selectedRoom?.id || selectedRoom?._id) === (item.id || item._id);
-                        return (
-                          <TouchableOpacity
-                            style={[S.roomItem, isSelected && S.roomItemSelected]}
-                            onPress={() => setSelectedRoom(item)}
-                            activeOpacity={0.8}
-                          >
-                            <View style={S.roomItemLeft}>
-                              <Text style={[S.roomCode, isSelected && S.roomCodeSelected]}>{code}</Text>
-                              <Text style={S.roomMeta}>
-                                {building ? `${building} - ` : ''}{capacity ? `${capacity} seats` : ''}
-                              </Text>
-                            </View>
-                            {isSelected && <Text style={S.roomCheck}></Text>}
-                          </TouchableOpacity>
-                        );
-                      }}
-                    />
+                      <TextInput
+                        className="border border-gray-200 rounded-xl py-2.5 px-3 text-base text-gray-800 bg-gray-50 mb-2"
+                        placeholder="Search rooms..."
+                        placeholderTextColor="#9CA3AF"
+                        value={roomFilterQuery}
+                        onChangeText={setRoomFilterQuery}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                      />
+                      <FlatList
+                        data={availableRooms.filter((r) => {
+                          if (!roomFilterQuery.trim()) return true;
+                          const q = roomFilterQuery.trim().toLowerCase();
+                          const code = (r.roomCode || r.room_code || r.name || r.code || '').toLowerCase();
+                          const bldg = (r.building || r.block || '').toLowerCase();
+                          return code.includes(q) || bldg.includes(q);
+                        })}
+                        keyExtractor={(item) => String(item.id || item._id || item.roomCode || item.name)}
+                        className="max-h-60"
+                        renderItem={({ item }) => {
+                          const code = item.roomCode || item.room_code || item.name || item.code || 'Unknown';
+                          const capacity = item.capacity || item.seats || null;
+                          const building = item.building || item.block || '';
+                          const isSelected = (selectedRoom?.id || selectedRoom?._id) === (item.id || item._id);
+                          return (
+                            <TouchableOpacity
+                              className={`flex-row items-center justify-between border rounded-xl p-3 mb-2 ${isSelected ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 bg-gray-50'}`}
+                              onPress={() => setSelectedRoom(item)}
+                            >
+                              <View className="flex-1">
+                                <Text className={`text-base font-bold ${isSelected ? 'text-indigo-600' : 'text-gray-800'}`}>{code}</Text>
+                                <Text className="text-sm text-gray-500 mt-0.5">
+                                  {building ? `${building} - ` : ''}{capacity ? `${capacity} seats` : ''}
+                                </Text>
+                              </View>
+                              {isSelected && <Icon name="check-circle" size={20} color="#6366F1" />}
+                            </TouchableOpacity>
+                          );
+                        }}
+                      />
                     </>
                   )}
 
                   <TouchableOpacity
-                    style={[S.confirmBtn, { backgroundColor: '#C2410C', marginTop: 12 }, !selectedRoom && { opacity: 0.5 }]}
+                    className={`rounded-xl py-3.5 items-center mt-3 ${selectedRoom ? 'bg-amber-500' : 'bg-gray-300'}`}
                     onPress={handleRescheduleConfirm}
                     disabled={!selectedRoom}
-                    activeOpacity={0.85}
                   >
-                    <Text style={S.confirmBtnText}>Confirm Reschedule</Text>
+                    <Text className="text-white text-base font-bold">Confirm Reschedule</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={S.backBtn}
-                    onPress={() => { setRescheduleStep(1); setSelectedRoom(null); }}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={S.backBtnText}>Back to Time Selection</Text>
+                  <TouchableOpacity className="border border-gray-200 rounded-xl py-3 items-center mt-2" onPress={() => { setRescheduleStep(1); setSelectedRoom(null); }}>
+                    <Text className="text-gray-600 text-base font-semibold">Back</Text>
                   </TouchableOpacity>
                 </>
               )}
@@ -2498,37 +2385,35 @@ export default function AssignedTimetableScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/*  Make-Up Session Modal  */}
+      {/* Make-Up Modal */}
       <Modal
         visible={makeupModal.visible}
         transparent
         animationType="slide"
         onRequestClose={closeMakeupModal}
       >
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-          <Pressable style={S.modalOverlay} onPress={closeMakeupModal}>
-            <Pressable onPress={() => {}} style={S.actionSheet}>
-              <View style={S.actionSheetHandle} />
-              <Text style={S.actionSheetTitle}>Add Make-Up Session</Text>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1">
+          <Pressable className="flex-1 bg-black/50 justify-end" onPress={closeMakeupModal}>
+            <Pressable onPress={() => {}} className="bg-white rounded-t-3xl px-5 pt-5 pb-8">
+              <View className="w-12 h-1 bg-gray-300 rounded-full self-center mb-4" />
+              <Text className="text-lg font-bold text-gray-800 mb-1">Add Make-Up Session</Text>
               {!!makeupModal.entry && (
-                <Text style={S.actionSheetSubtitle}>
-                  For: {String(makeupModal.entry?.unitCode || '').trim()}{makeupModal.entry?.unitTitle || makeupModal.entry?.unitName ? ` - ${makeupModal.entry.unitTitle || makeupModal.entry.unitName}` : ''}
+                <Text className="text-sm text-gray-500 mb-4">
+                  For: {String(makeupModal.entry?.unitCode || '').trim()}{makeupModal.entry?.unitTitle || makeupModal.entry?.unitName ? ` - ${makeupModal.entry.unitTitle || makeupModal.entry?.unitName}` : ''}
                 </Text>
               )}
 
-              {/* Step indicator */}
-              <View style={S.stepRow}>
-                <View style={[S.stepDot, makeupStep >= 1 && S.stepDotActive]} />
-                <View style={[S.stepLine, makeupStep >= 2 && S.stepLineActive]} />
-                <View style={[S.stepDot, makeupStep >= 2 && S.stepDotActive]} />
+              <View className="flex-row items-center justify-center mb-5">
+                <View className={`w-3 h-3 rounded-full ${makeupStep >= 1 ? 'bg-emerald-500' : 'bg-gray-200'}`} />
+                <View className={`w-12 h-0.5 mx-1 ${makeupStep >= 2 ? 'bg-emerald-500' : 'bg-gray-200'}`} />
+                <View className={`w-3 h-3 rounded-full ${makeupStep >= 2 ? 'bg-emerald-500' : 'bg-gray-200'}`} />
               </View>
 
               {makeupStep === 1 ? (
                 <>
-                  {/* Step 1: Date, start/end time, lesson type */}
-                  <Text style={S.fieldLabel}>Date</Text>
-                  <TouchableOpacity style={S.timeInput} onPress={() => setShowMakeupDatePicker(true)} activeOpacity={0.8}>
-                    <Text style={makeupDate ? S.timeInputText : S.timeInputPlaceholder}>
+                  <Text className="text-base font-semibold text-gray-700 mb-1.5">Date</Text>
+                  <TouchableOpacity className="border border-gray-200 rounded-xl py-3 px-4 bg-gray-50 mb-3" onPress={() => setShowMakeupDatePicker(true)}>
+                    <Text className={makeupDate ? 'text-base font-semibold text-gray-800' : 'text-base text-gray-400'}>
                       {makeupDate
                         ? makeupDate.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
                         : 'Tap to select date'}
@@ -2546,9 +2431,9 @@ export default function AssignedTimetableScreen() {
                     />
                   )}
 
-                  <Text style={S.fieldLabel}>Start Time</Text>
-                  <TouchableOpacity style={S.timeInput} onPress={() => setShowMakeupStartPicker(true)} activeOpacity={0.8}>
-                    <Text style={makeupStartTime ? S.timeInputText : S.timeInputPlaceholder}>
+                  <Text className="text-base font-semibold text-gray-700 mb-1.5">Start Time</Text>
+                  <TouchableOpacity className="border border-gray-200 rounded-xl py-3 px-4 bg-gray-50 mb-3" onPress={() => setShowMakeupStartPicker(true)}>
+                    <Text className={makeupStartTime ? 'text-base font-semibold text-gray-800' : 'text-base text-gray-400'}>
                       {makeupStartTime ? formatTime(makeupStartTime) : 'Tap to select start time'}
                     </Text>
                   </TouchableOpacity>
@@ -2565,9 +2450,9 @@ export default function AssignedTimetableScreen() {
                     />
                   )}
 
-                  <Text style={S.fieldLabel}>End Time</Text>
-                  <TouchableOpacity style={S.timeInput} onPress={() => setShowMakeupEndPicker(true)} activeOpacity={0.8}>
-                    <Text style={makeupEndTime ? S.timeInputText : S.timeInputPlaceholder}>
+                  <Text className="text-base font-semibold text-gray-700 mb-1.5">End Time</Text>
+                  <TouchableOpacity className="border border-gray-200 rounded-xl py-3 px-4 bg-gray-50 mb-3" onPress={() => setShowMakeupEndPicker(true)}>
+                    <Text className={makeupEndTime ? 'text-base font-semibold text-gray-800' : 'text-base text-gray-400'}>
                       {makeupEndTime ? formatTime(makeupEndTime) : 'Tap to select end time'}
                     </Text>
                   </TouchableOpacity>
@@ -2584,55 +2469,53 @@ export default function AssignedTimetableScreen() {
                     />
                   )}
 
-                  <Text style={S.fieldLabel}>Lesson Type</Text>
-                  <View style={S.dayPickerRow}>
+                  <Text className="text-base font-semibold text-gray-700 mb-1.5">Lesson Type</Text>
+                  <View className="flex-row flex-wrap gap-1.5 mb-3">
                     {LESSON_TYPES.filter((lt) => ['LEC', 'TUT', 'LAB', 'SEM', 'WRK', 'CAT', 'RAT', 'PRE'].includes(lt.code)).map((lt) => (
                       <TouchableOpacity
                         key={lt.code}
-                        style={[S.dayPill, makeupLessonType === lt.code && S.dayPillActive]}
+                        className={`rounded-lg py-1.5 px-3 border ${makeupLessonType === lt.code ? 'border-emerald-500 bg-emerald-50' : 'border-gray-200 bg-gray-50'}`}
                         onPress={() => setMakeupLessonType(lt.code)}
                       >
-                        <Text style={[S.dayPillText, makeupLessonType === lt.code && S.dayPillTextActive]}>{lt.code}</Text>
+                        <Text className={`text-sm font-semibold ${makeupLessonType === lt.code ? 'text-emerald-600' : 'text-gray-600'}`}>{lt.code}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>
 
-                  {!!makeupRoomError && <Text style={S.roomSearchError}>{makeupRoomError}</Text>}
+                  {!!makeupRoomError && <Text className="text-red-500 text-sm mt-2 text-center">{makeupRoomError}</Text>}
 
                   <TouchableOpacity
-                    style={[S.confirmBtn, { backgroundColor: '#15803D', marginTop: 12 }]}
+                    className="bg-emerald-500 rounded-xl py-3.5 items-center mt-3"
                     onPress={handleFindRoomsForMakeup}
                     disabled={makeupSearchingRooms}
-                    activeOpacity={0.85}
                   >
                     {makeupSearchingRooms ? (
                       <ActivityIndicator color="#FFF" size="small" />
                     ) : (
-                      <Text style={S.confirmBtnText}>Find Available Rooms</Text>
+                      <Text className="text-white text-base font-bold">Find Available Rooms</Text>
                     )}
                   </TouchableOpacity>
-                  <TouchableOpacity style={S.backBtn} onPress={closeMakeupModal} activeOpacity={0.85}>
-                    <Text style={S.backBtnText}>Cancel</Text>
+                  <TouchableOpacity className="border border-gray-200 rounded-xl py-3 items-center mt-2" onPress={closeMakeupModal}>
+                    <Text className="text-gray-600 text-base font-semibold">Cancel</Text>
                   </TouchableOpacity>
                 </>
               ) : (
                 <>
-                  {/* Step 2: Room selection + save */}
-                  <Text style={S.roomSummaryText}>
+                  <Text className="text-lg font-semibold text-emerald-600 mb-3 text-center">
                     {makeupDate?.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} - {formatTime(makeupStartTime)} to {formatTime(makeupEndTime)}
                   </Text>
 
                   {makeupAvailableRooms.length === 0 ? (
-                    <View style={S.noRoomsWrap}>
-                      <Text style={S.noRoomsText}>No rooms available for this time slot.</Text>
-                      <Text style={S.noRoomsHint}>Try a different date or time window.</Text>
+                    <View className="items-center py-6">
+                      <Text className="text-base font-semibold text-gray-600">No rooms available for this time slot.</Text>
+                      <Text className="mt-1 text-sm text-gray-400">Try a different date or time window.</Text>
                     </View>
                   ) : (
                     <>
                       <TextInput
-                        style={S.roomSearchInput}
+                        className="border border-gray-200 rounded-xl py-2.5 px-3 text-base text-gray-800 bg-gray-50 mb-2"
                         placeholder="Search rooms..."
-                        placeholderTextColor="#94A3B8"
+                        placeholderTextColor="#9CA3AF"
                         value={makeupRoomFilter}
                         onChangeText={setMakeupRoomFilter}
                         autoCapitalize="none"
@@ -2647,7 +2530,7 @@ export default function AssignedTimetableScreen() {
                           return code.includes(q) || bldg.includes(q);
                         })}
                         keyExtractor={(item) => String(item.id || item._id || item.roomCode || item.name)}
-                        style={S.roomList}
+                        className="max-h-60"
                         renderItem={({ item }) => {
                           const code = item.roomCode || item.room_code || item.name || item.code || 'Unknown';
                           const capacity = item.capacity || item.seats || null;
@@ -2655,17 +2538,16 @@ export default function AssignedTimetableScreen() {
                           const isSelected = (makeupSelectedRoom?.id || makeupSelectedRoom?._id) === (item.id || item._id);
                           return (
                             <TouchableOpacity
-                              style={[S.roomItem, isSelected && S.roomItemSelected]}
+                              className={`flex-row items-center justify-between border rounded-xl p-3 mb-2 ${isSelected ? 'border-emerald-500 bg-emerald-50' : 'border-gray-200 bg-gray-50'}`}
                               onPress={() => setMakeupSelectedRoom(item)}
-                              activeOpacity={0.8}
                             >
-                              <View style={S.roomItemLeft}>
-                                <Text style={[S.roomCode, isSelected && S.roomCodeSelected]}>{code}</Text>
-                                <Text style={S.roomMeta}>
+                              <View className="flex-1">
+                                <Text className={`text-base font-bold ${isSelected ? 'text-emerald-600' : 'text-gray-800'}`}>{code}</Text>
+                                <Text className="text-sm text-gray-500 mt-0.5">
                                   {building ? `${building} - ` : ''}{capacity ? `${capacity} seats` : ''}
                                 </Text>
                               </View>
-                              {isSelected && <Text style={S.roomCheck}></Text>}
+                              {isSelected && <Icon name="check-circle" size={20} color="#10B981" />}
                             </TouchableOpacity>
                           );
                         }}
@@ -2674,27 +2556,18 @@ export default function AssignedTimetableScreen() {
                   )}
 
                   <TouchableOpacity
-                    style={[
-                      S.confirmBtn,
-                      { backgroundColor: '#15803D', marginTop: 12 },
-                      (!makeupSelectedRoom || savingMakeup) && { opacity: 0.5 },
-                    ]}
+                    className={`rounded-xl py-3.5 items-center mt-3 ${(!makeupSelectedRoom || savingMakeup) ? 'bg-gray-300' : 'bg-emerald-500'}`}
                     onPress={handleSaveMakeup}
                     disabled={!makeupSelectedRoom || savingMakeup}
-                    activeOpacity={0.85}
                   >
                     {savingMakeup ? (
                       <ActivityIndicator color="#FFF" size="small" />
                     ) : (
-                      <Text style={S.confirmBtnText}>Save Make-Up Session</Text>
+                      <Text className="text-white text-base font-bold">Save Make-Up Session</Text>
                     )}
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={S.backBtn}
-                    onPress={() => { setMakeupStep(1); setMakeupSelectedRoom(null); }}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={S.backBtnText}>Back to Date & Time</Text>
+                  <TouchableOpacity className="border border-gray-200 rounded-xl py-3 items-center mt-2" onPress={() => { setMakeupStep(1); setMakeupSelectedRoom(null); }}>
+                    <Text className="text-gray-600 text-base font-semibold">Back</Text>
                   </TouchableOpacity>
                 </>
               )}
@@ -2703,25 +2576,25 @@ export default function AssignedTimetableScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/*  Online Lesson Modal  */}
+      {/* Online Modal */}
       <Modal
         visible={onlineModal.visible}
         transparent
         animationType="slide"
         onRequestClose={() => setOnlineModal({ visible: false, entry: null })}
       >
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-          <Pressable style={S.modalOverlay} onPress={() => setOnlineModal({ visible: false, entry: null })}>
-            <Pressable onPress={() => {}} style={S.actionSheet}>
-              <View style={S.actionSheetHandle} />
-              <Text style={S.actionSheetTitle}>Mark as Online</Text>
-              <Text style={S.actionSheetSubtitle}>
-                Set the scheduled online time. Students will be notified and the room will be freed. Share the meeting link via the Online Attendance Screen when you start.
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1">
+          <Pressable className="flex-1 bg-black/50 justify-end" onPress={() => setOnlineModal({ visible: false, entry: null })}>
+            <Pressable onPress={() => {}} className="bg-white rounded-t-3xl px-5 pt-5 pb-8">
+              <View className="w-12 h-1 bg-gray-300 rounded-full self-center mb-4" />
+              <Text className="text-lg font-bold text-gray-800 mb-1">Mark as Online</Text>
+              <Text className="text-sm text-gray-500 mb-4">
+                Set the scheduled online time. Students will be notified and the room will be freed.
               </Text>
 
-              <Text style={S.fieldLabel}>Start Time</Text>
-              <TouchableOpacity style={S.timeInput} onPress={() => setShowOnlineStartPicker(true)} activeOpacity={0.8}>
-                <Text style={onlineStartTime ? S.timeInputText : S.timeInputPlaceholder}>
+              <Text className="text-base font-semibold text-gray-700 mb-1.5">Start Time</Text>
+              <TouchableOpacity className="border border-gray-200 rounded-xl py-3 px-4 bg-gray-50 mb-3" onPress={() => setShowOnlineStartPicker(true)}>
+                <Text className={onlineStartTime ? 'text-base font-semibold text-gray-800' : 'text-base text-gray-400'}>
                   {onlineStartTime ? formatTime(onlineStartTime) : 'Tap to select start time'}
                 </Text>
               </TouchableOpacity>
@@ -2738,9 +2611,9 @@ export default function AssignedTimetableScreen() {
                 />
               )}
 
-              <Text style={S.fieldLabel}>End Time <Text style={S.optionalLabel}>(optional)</Text></Text>
-              <TouchableOpacity style={S.timeInput} onPress={() => setShowOnlineEndPicker(true)} activeOpacity={0.8}>
-                <Text style={onlineEndTime ? S.timeInputText : S.timeInputPlaceholder}>
+              <Text className="text-base font-semibold text-gray-700 mb-1.5">End Time <Text className="font-normal text-gray-400">(optional)</Text></Text>
+              <TouchableOpacity className="border border-gray-200 rounded-xl py-3 px-4 bg-gray-50 mb-4" onPress={() => setShowOnlineEndPicker(true)}>
+                <Text className={onlineEndTime ? 'text-base font-semibold text-gray-800' : 'text-base text-gray-400'}>
                   {onlineEndTime ? formatTime(onlineEndTime) : 'Tap to select end time'}
                 </Text>
               </TouchableOpacity>
@@ -2758,7 +2631,7 @@ export default function AssignedTimetableScreen() {
               )}
 
               <TouchableOpacity
-                style={[S.confirmBtn, { backgroundColor: '#0891B2', marginTop: 16 }]}
+                className="bg-cyan-500 rounded-xl py-3.5 items-center mt-2"
                 onPress={() => {
                   const { entry } = onlineModal;
                   const onlinePayload = {
@@ -2767,13 +2640,11 @@ export default function AssignedTimetableScreen() {
                   };
                   setOnlineModal({ visible: false, entry: null });
                   handleStatusChange(entry, 'Online', onlinePayload);
-                  // Propagate online status to all sibling entries in the same merged group
                   if (entry?.isMerged && entry?.mergedSessionId) {
                     entries
                       .filter((e) => String(e?.mergedSessionId || '') === String(entry.mergedSessionId) && String(e?.id || '') !== String(entry.id || ''))
                       .forEach((sibling) => handleStatusChange(sibling, 'Online', onlinePayload));
                   }
-                  // Notify students  one notification covering all merged sections
                   {
                     const unitCode = String(entry?.unitCode || entry?.code || '').trim();
                     const allSiblings = (entry?.isMerged && entry?.mergedSessionId)
@@ -2798,50 +2669,48 @@ export default function AssignedTimetableScreen() {
                     }).catch(() => {});
                   }
                 }}
-                activeOpacity={0.85}
               >
-                <Text style={S.confirmBtnText}>Confirm Online Session</Text>
+                <Text className="text-white text-base font-bold">Confirm Online Session</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={S.backBtn}
-                onPress={() => setOnlineModal({ visible: false, entry: null })}
-                activeOpacity={0.85}
-              >
-                <Text style={S.backBtnText}>Cancel</Text>
+              <TouchableOpacity className="border border-gray-200 rounded-xl py-3 items-center mt-2" onPress={() => setOnlineModal({ visible: false, entry: null })}>
+                <Text className="text-gray-600 text-base font-semibold">Cancel</Text>
               </TouchableOpacity>
             </Pressable>
           </Pressable>
         </KeyboardAvoidingView>
       </Modal>
 
-      {/*  Merge Lessons Modal  */}
+      {/* Merge Modal */}
       <Modal
         visible={mergeModal.visible}
         transparent
         animationType="slide"
         onRequestClose={closeMergeModal}
       >
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-          <Pressable style={S.modalOverlay} onPress={closeMergeModal}>
-            <Pressable onPress={() => {}} style={S.actionSheet}>
-              <View style={S.actionSheetHandle} />
-              <Text style={S.actionSheetTitle}>Merge Lessons</Text>
-              <Text style={S.actionSheetSubtitle}>
-                Combine multiple class sections for the same unit into one shared lecture room. All enrolled students will be notified.
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1">
+          <Pressable className="flex-1 bg-black/50 justify-end" onPress={closeMergeModal}>
+            <Pressable onPress={() => {}} className="bg-white rounded-t-3xl px-5 pt-5 pb-8">
+              <View className="w-12 h-1 bg-gray-300 rounded-full self-center mb-4" />
+              <Text className="text-lg font-bold text-gray-800 mb-1">Merge Lessons</Text>
+              <Text className="text-sm text-gray-500 mb-4">
+                Combine multiple class sections for the same unit into one shared lecture room.
               </Text>
 
-              {/* Step indicator */}
-              <View style={S.stepRow}>
-                <View style={[S.stepDot, mergeStep >= 1 && S.stepDotActive]} />
-                <View style={[S.stepLine, mergeStep >= 2 && S.stepLineActive]} />
-                <View style={[S.stepDot, mergeStep >= 2 && S.stepDotActive]} />
+              <View className="flex-row items-center justify-center mb-5">
+                <View className={`w-3 h-3 rounded-full ${mergeStep >= 1 ? 'bg-indigo-500' : 'bg-gray-200'}`} />
+                <View className={`w-12 h-0.5 mx-1 ${mergeStep >= 2 ? 'bg-indigo-500' : 'bg-gray-200'}`} />
+                <View className={`w-3 h-3 rounded-full ${mergeStep >= 2 ? 'bg-indigo-500' : 'bg-gray-200'}`} />
               </View>
 
               {mergeStep === 1 ? (
                 <>
-                  {/*  Step 1: Review sections + note  */}
-                  <Text style={S.fieldLabel}>Select sections to merge ({mergeSelectedIds.size} selected)</Text>
-                  <Text style={S.mergeSelectionHint}>Tap a section to select or deselect it. At least 2 must be selected.</Text>
+                  <Text className="text-base font-semibold text-gray-700 mb-1">
+                    Select sections to merge ({mergeSelectedIds.size} selected)
+                  </Text>
+                  <Text className="text-xs text-gray-400 mb-3 font-medium">
+                    Tap a section to select or deselect it. At least 2 must be selected.
+                  </Text>
+
                   {(mergeModal.allCandidates || []).map((e) => {
                     const isSelected = mergeSelectedIds.has(String(e.id));
                     const isOwn = String(e.id) === String(mergeModal.entry?.id);
@@ -2853,12 +2722,12 @@ export default function AssignedTimetableScreen() {
                     return (
                       <TouchableOpacity
                         key={String(e.id)}
-                        style={[S.mergeSectionRow, isSelected && S.mergeSectionRowSelected]}
+                        className={`flex-row items-center justify-between border rounded-xl p-3 mb-2 ${isSelected ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 bg-gray-50'}`}
                         onPress={() => {
                           setMergeSelectedIds((prev) => {
                             const next = new Set(prev);
                             if (next.has(String(e.id))) {
-                              if (next.size <= 2) return prev; // keep at least 2
+                              if (next.size <= 2) return prev;
                               next.delete(String(e.id));
                             } else {
                               next.add(String(e.id));
@@ -2866,75 +2735,72 @@ export default function AssignedTimetableScreen() {
                             return next;
                           });
                         }}
-                        activeOpacity={0.75}
                       >
-                        <View style={S.mergeSectionLeft}>
-                          <Text style={[S.mergeSectionUnit, !isSelected && S.mergeSectionUnitDimmed]}>
-                            {e.unitTitle || e.unitName || e.unitCode}{isOwn ? ' (this lesson)' : ''}
+                        <View className="flex-1 mr-2">
+                          <Text className={`text-sm font-semibold ${isSelected ? 'text-indigo-600' : 'text-gray-700'}`}>
+                            {e.unitTitle || e.unitName || e.unitCode}{isOwn ? ' (this)' : ''}
                           </Text>
                           {!!courseInfo && (
-                            <Text style={S.mergeSectionCourse} numberOfLines={1}>{courseInfo}</Text>
+                            <Text className="text-xs text-gray-500" numberOfLines={1}>{courseInfo}</Text>
                           )}
-                          <Text style={S.mergeSectionMeta}>{eTime} - {eRoom}</Text>
+                          <Text className="text-xs text-gray-400">{eTime} - {eRoom}</Text>
                         </View>
-                        <View style={[S.mergeCheckbox, isSelected && S.mergeCheckboxSelected]}>
-                          {isSelected && <Text style={S.mergeCheckboxCheck}></Text>}
+                        <View className={`w-6 h-6 rounded-md border-2 items-center justify-center ${isSelected ? 'border-indigo-500 bg-indigo-500' : 'border-gray-300 bg-white'}`}>
+                          {isSelected && <Icon name="check" size={14} color="#FFF" />}
                         </View>
                       </TouchableOpacity>
                     );
                   })}
 
-                  <Text style={[S.fieldLabel, { marginTop: 12 }]}>
-                    Announcement note <Text style={S.optionalLabel}>(optional)</Text>
+                  <Text className="text-base font-semibold text-gray-700 mt-3 mb-1">
+                    Announcement note <Text className="font-normal text-gray-400">(optional)</Text>
                   </Text>
                   <TextInput
-                    style={S.reasonInput}
-                    placeholder="e.g. All BSc CS and BSc IT students  same room, same time."
-                    placeholderTextColor="#94A3B8"
+                    className="border border-gray-200 rounded-xl p-3 text-gray-800 bg-gray-50 min-h-[80px] text-base"
+                    placeholder="e.g. All BSc CS and BSc IT students - same room, same time."
+                    placeholderTextColor="#9CA3AF"
                     multiline
                     numberOfLines={3}
                     value={mergeNote}
                     onChangeText={setMergeNote}
                     maxLength={200}
                   />
-                  <Text style={S.charCount}>{mergeNote.length}/200</Text>
+                  <Text className="text-xs text-gray-400 text-right mt-1">{mergeNote.length}/200</Text>
 
-                  {!!mergeRoomError && <Text style={S.roomSearchError}>{mergeRoomError}</Text>}
+                  {!!mergeRoomError && <Text className="text-red-500 text-sm mt-2 text-center">{mergeRoomError}</Text>}
 
                   <TouchableOpacity
-                    style={[S.confirmBtn, { backgroundColor: '#0F766E', marginTop: 4 }]}
+                    className="bg-indigo-500 rounded-xl py-3.5 items-center mt-3"
                     onPress={handleFindRoomsForMerge}
                     disabled={mergeSearchingRooms}
-                    activeOpacity={0.85}
                   >
                     {mergeSearchingRooms ? (
                       <ActivityIndicator color="#FFF" size="small" />
                     ) : (
-                      <Text style={S.confirmBtnText}>Find Available Rooms</Text>
+                      <Text className="text-white text-base font-bold">Find Available Room</Text>
                     )}
                   </TouchableOpacity>
-                  <TouchableOpacity style={S.backBtn} onPress={closeMergeModal} activeOpacity={0.85}>
-                    <Text style={S.backBtnText}>Cancel</Text>
+                  <TouchableOpacity className="border border-gray-200 rounded-xl py-3 items-center mt-2" onPress={closeMergeModal}>
+                    <Text className="text-gray-600 text-base font-semibold">Cancel</Text>
                   </TouchableOpacity>
                 </>
               ) : (
                 <>
-                  {/*  Step 2: Room selection  */}
-                  <Text style={S.roomSummaryText}>
+                  <Text className="text-lg font-semibold text-indigo-600 mb-3 text-center">
                     {mergeModal.entry?.day} - {String(mergeModal.entry?.startTime || mergeModal.entry?.time || '').replace(/\s*[-].*$/, '').trim()} to {mergeModal.entry?.endTime || ''}
                   </Text>
 
                   {mergeAvailableRooms.length === 0 ? (
-                    <View style={S.noRoomsWrap}>
-                      <Text style={S.noRoomsText}>No rooms available for this slot.</Text>
-                      <Text style={S.noRoomsHint}>Consider rescheduling one of the sections first.</Text>
+                    <View className="items-center py-6">
+                      <Text className="text-base font-semibold text-gray-600">No rooms available for this slot.</Text>
+                      <Text className="mt-1 text-sm text-gray-400">Consider rescheduling one of the sections first.</Text>
                     </View>
                   ) : (
                     <>
                       <TextInput
-                        style={S.roomSearchInput}
+                        className="border border-gray-200 rounded-xl py-2.5 px-3 text-base text-gray-800 bg-gray-50 mb-2"
                         placeholder="Search rooms..."
-                        placeholderTextColor="#94A3B8"
+                        placeholderTextColor="#9CA3AF"
                         value={mergeRoomFilter}
                         onChangeText={setMergeRoomFilter}
                         autoCapitalize="none"
@@ -2949,7 +2815,7 @@ export default function AssignedTimetableScreen() {
                           return code.includes(q) || bldg.includes(q);
                         })}
                         keyExtractor={(item) => String(item.id || item._id || item.roomCode || item.name)}
-                        style={S.roomList}
+                        className="max-h-60"
                         renderItem={({ item }) => {
                           const code = item.roomCode || item.room_code || item.name || item.code || 'Unknown';
                           const capacity = item.capacity || item.seats || null;
@@ -2957,17 +2823,16 @@ export default function AssignedTimetableScreen() {
                           const isSelected = (mergeSelectedRoom?.id || mergeSelectedRoom?._id) === (item.id || item._id);
                           return (
                             <TouchableOpacity
-                              style={[S.roomItem, isSelected && S.roomItemSelected]}
+                              className={`flex-row items-center justify-between border rounded-xl p-3 mb-2 ${isSelected ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 bg-gray-50'}`}
                               onPress={() => setMergeSelectedRoom(item)}
-                              activeOpacity={0.8}
                             >
-                              <View style={S.roomItemLeft}>
-                                <Text style={[S.roomCode, isSelected && S.roomCodeSelected]}>{code}</Text>
-                                <Text style={S.roomMeta}>
+                              <View className="flex-1">
+                                <Text className={`text-base font-bold ${isSelected ? 'text-indigo-600' : 'text-gray-800'}`}>{code}</Text>
+                                <Text className="text-sm text-gray-500 mt-0.5">
                                   {building ? `${building} - ` : ''}{capacity ? `${capacity} seats` : ''}
                                 </Text>
                               </View>
-                              {isSelected && <Text style={S.roomCheck}></Text>}
+                              {isSelected && <Icon name="check-circle" size={20} color="#6366F1" />}
                             </TouchableOpacity>
                           );
                         }}
@@ -2975,30 +2840,21 @@ export default function AssignedTimetableScreen() {
                     </>
                   )}
 
-                  {!!mergeError && <Text style={S.roomSearchError}>{mergeError}</Text>}
+                  {!!mergeError && <Text className="text-red-500 text-sm mt-2 text-center">{mergeError}</Text>}
 
                   <TouchableOpacity
-                    style={[
-                      S.confirmBtn,
-                      { backgroundColor: '#0F766E', marginTop: 12 },
-                      (!mergeSelectedRoom || savingMerge) && { opacity: 0.5 },
-                    ]}
+                    className={`rounded-xl py-3.5 items-center mt-3 ${(!mergeSelectedRoom || savingMerge) ? 'bg-gray-300' : 'bg-indigo-500'}`}
                     onPress={handleConfirmMerge}
                     disabled={!mergeSelectedRoom || savingMerge}
-                    activeOpacity={0.85}
                   >
                     {savingMerge ? (
                       <ActivityIndicator color="#FFF" size="small" />
                     ) : (
-                      <Text style={S.confirmBtnText}>Confirm Merge & Notify Students</Text>
+                      <Text className="text-white text-base font-bold">Confirm Merge & Notify</Text>
                     )}
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={S.backBtn}
-                    onPress={() => { setMergeStep(1); setMergeSelectedRoom(null); }}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={S.backBtnText}>Back</Text>
+                  <TouchableOpacity className="border border-gray-200 rounded-xl py-3 items-center mt-2" onPress={() => { setMergeStep(1); setMergeSelectedRoom(null); }}>
+                    <Text className="text-gray-600 text-base font-semibold">Back</Text>
                   </TouchableOpacity>
                 </>
               )}
@@ -3006,372 +2862,6 @@ export default function AssignedTimetableScreen() {
           </Pressable>
         </KeyboardAvoidingView>
       </Modal>
-    </ScrollView>
     </SafeAreaView>
   );
 }
-
-const makeStyles = (C) => StyleSheet.create({
-  //  Outer shell 
-  screen: { flex: 1, backgroundColor: C.bg },
-
-  //  Gradient header
-  header: {
-    paddingTop: Platform.OS === 'ios' ? 20 : 16,
-    paddingBottom: 16,
-    paddingHorizontal: 18,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  headerOrb: {
-    position: 'absolute',
-    width: 180,
-    height: 180,
-    borderRadius: 90,
-    backgroundColor: 'rgba(165,180,252,0.08)',
-    top: -60,
-    right: -40,
-  },
-  headerTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    marginBottom: 14,
-  },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    letterSpacing: -0.3,
-  },
-  headerDate: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.55)',
-    marginTop: 3,
-    fontWeight: '500',
-  },
-  headerTopRight: {
-    alignItems: 'flex-end',
-    paddingTop: 4,
-  },
-  bgDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#A5B4FC',
-  },
-  syncBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(110,231,183,0.12)',
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(110,231,183,0.25)',
-  },
-  syncBadgeText: {
-    fontSize: 10,
-    color: '#6EE7B7',
-    fontWeight: '600',
-  },
-
-  /* Stats strip */
-  statStrip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: C.bgSec,
-    borderRadius: 16,
-    paddingVertical: 12,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-  statCell: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 4,
-  },
-  statIconWrap: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    backgroundColor: C.bgTert,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 2,
-  },
-  statValue: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    letterSpacing: -0.2,
-  },
-  statLabel: {
-    fontSize: 9,
-    color: 'rgba(255,255,255,0.45)',
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-  statDiv: {
-    width: 1,
-    height: 38,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-
-  /* Next class card */
-  nextCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.28)',
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    gap: 10,
-  },
-  nextCardLeft: {
-    flex: 1,
-    gap: 3,
-  },
-  nextCardBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginBottom: 2,
-  },
-  nextCardBadgeText: {
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.6,
-  },
-  nextCardName: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  nextCardMeta: {
-    fontSize: 11,
-    color: 'rgba(255,255,255,0.45)',
-    fontWeight: '500',
-  },
-  nextCardRight: {
-    alignItems: 'center',
-    gap: 2,
-  },
-  nextCardCountdown: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    textAlign: 'right',
-  },
-
-  //  Offline banner (above scroll) 
-  offlineBanner: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(245,158,11,0.12)', borderBottomWidth: 1, borderBottomColor: 'rgba(245,158,11,0.25)', paddingVertical: 6, paddingHorizontal: 16 },
-  offlineBannerText: { fontSize: 11, color: C.warning, fontWeight: '600', flex: 1 },
-
-  //  Scroll container 
-  scroll: { flex: 1 },
-  scrollContent: { padding: 14, paddingBottom: 30 },
-
-  //  Center state (loading / error / empty) 
-  centerState: { marginTop: 40, alignItems: 'center', justifyContent: 'center' },
-  stateText: { marginTop: 10, color: C.textMuted, fontSize: 14, textAlign: 'center' },
-  errorText: { color: C.dangerLt, fontSize: 14, textAlign: 'center' },
-
-  //  Day group card 
-  dayCard: { backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, borderRadius: 14, marginBottom: 12, padding: 12 },
-  dayCardToday: { borderColor: `${C.primary}55`, backgroundColor: C.primarySoft },
-  dayTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
-  dayTitle: { fontSize: 15, fontWeight: '700', color: C.textSec },
-  dayTitleToday: { color: C.primaryDk },
-  todayPill: { backgroundColor: C.primarySoft, borderWidth: 1, borderColor: `${C.primary}55`, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
-  todayPillText: { fontSize: 10, fontWeight: '700', color: C.primaryDk },
-
-  //  Regular lesson entry row 
-  entryRow: { borderTopWidth: 1, borderTopColor: C.border, paddingTop: 10, marginTop: 8 },
-  entryHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 4 },
-  entryHeaderLeft: { flex: 1, marginRight: 8 },
-  unitName: { fontSize: 14, fontWeight: '700', color: C.textPri },
-  unitCode: { marginTop: 2, marginBottom: 3, fontSize: 11, fontWeight: '700', color: C.primaryLt },
-  unitCourse: { marginTop: 1, marginBottom: 2, fontSize: 11, fontWeight: '500', color: C.textMuted },
-  metaText: { color: C.textSec, fontSize: 12, marginTop: 2 },
-  statusMetaText: { marginTop: 6, color: C.textSec, fontSize: 12 },
-
-  //  Status dropdown button 
-  statusDropdownBtn: { flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderRadius: 10, paddingVertical: 4, paddingHorizontal: 9, gap: 4, alignSelf: 'flex-start' },
-  statusDropdownBtnText: { fontSize: 12, fontWeight: '700' },
-  statusDropdownChevron: { fontSize: 13, fontWeight: '700' },
-
-  //  Lesson type pill 
-  lessonTypePill: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', borderWidth: 1, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, marginBottom: 4, gap: 3 },
-  lessonTypePillText: { fontSize: 11, fontWeight: '700' },
-  lessonTypePillChevron: { fontSize: 10, fontWeight: '700' },
-
-  //  Action chips 
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4, marginRight: 6, marginTop: 4 },
-  chipText: { fontSize: 11, fontWeight: '600' },
-
-  //  Make-up badge 
-  makeupBadge: { backgroundColor: 'rgba(21,128,61,0.18)', borderWidth: 1, borderColor: '#15803D', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
-  makeupBadgeText: { fontSize: 11, fontWeight: '700', color: '#4ADE80' },
-
-  //  Text action buttons (makeup, delete, merge, delegate) 
-  addMakeupBtn: { alignSelf: 'flex-start', marginTop: 7, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: '#15803D', borderStyle: 'dashed' },
-  addMakeupBtnText: { fontSize: 11, fontWeight: '600', color: '#4ADE80' },
-  deleteExtraBtn: { alignSelf: 'flex-start', marginTop: 7, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(185,28,28,0.15)', borderWidth: 1, borderColor: 'rgba(185,28,28,0.4)' },
-  deleteExtraBtnText: { fontSize: 11, fontWeight: '600', color: C.dangerLt },
-  mergeLessonsBtn: { alignSelf: 'flex-start', marginTop: 7, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(13,148,136,0.5)', backgroundColor: 'rgba(13,148,136,0.12)' },
-  mergeLessonsBtnText: { fontSize: 11, fontWeight: '600', color: C.tealLt },
-  delegateBtn: { alignSelf: 'flex-start', marginTop: 6, marginBottom: 2, borderWidth: 1, borderColor: 'rgba(16,185,129,0.4)', borderRadius: 10, paddingVertical: 5, paddingHorizontal: 12, backgroundColor: 'rgba(16,185,129,0.12)' },
-  delegateBtnText: { fontSize: 13, fontWeight: '700', color: C.successLt },
-
-  //  Merged badge (inline on regular card) 
-  mergedBadge: { marginTop: 8, backgroundColor: 'rgba(13,148,136,0.15)', borderWidth: 1, borderColor: 'rgba(45,212,191,0.4)', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
-  mergedBadgeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  mergedBadgeText: { fontSize: 12, fontWeight: '700', color: C.tealLt, flexShrink: 1 },
-  unmergeBtn: { marginLeft: 8, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, backgroundColor: 'rgba(185,28,28,0.15)', borderWidth: 1, borderColor: 'rgba(185,28,28,0.4)' },
-  unmergeBtnText: { fontSize: 11, fontWeight: '600', color: C.dangerLt },
-  mergedNoteText: { fontSize: 11, color: C.tealLt, marginTop: 2, fontStyle: 'italic' },
-
-  //  Reschedule info block 
-  rescheduleInfoBlock: { marginTop: 8, backgroundColor: 'rgba(194,65,12,0.12)', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(194,65,12,0.35)', padding: 10 },
-  rescheduleInfoHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
-  rescheduleInfoTitle: { fontSize: 12, fontWeight: '700', color: '#FB923C' },
-  rescheduleBadge: { alignSelf: 'flex-start', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
-  permanentBadge: { backgroundColor: 'rgba(29,78,216,0.18)' },
-  temporaryBadge: { backgroundColor: 'rgba(194,65,12,0.18)', borderWidth: 1, borderColor: 'rgba(194,65,12,0.35)' },
-  rescheduleBadgeText: { fontSize: 11, fontWeight: '700' },
-  permanentText: { color: C.infoLt },
-  temporaryText: { color: '#FB923C' },
-  rescheduleWasNowRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  rescheduleWasCol: { flex: 1, backgroundColor: 'rgba(120,53,15,0.35)', borderRadius: 8, padding: 7 },
-  rescheduleWasLabel: { fontSize: 10, fontWeight: '700', color: '#FCA5A5', marginBottom: 2, letterSpacing: 0.5 },
-  rescheduleWasTime: { fontSize: 12, fontWeight: '600', color: '#FCA5A5', textDecorationLine: 'line-through' },
-  rescheduleWasRoom: { fontSize: 11, color: C.dangerLt, textDecorationLine: 'line-through', marginTop: 1 },
-  rescheduleArrowLec: { fontSize: 22, color: '#FB923C', fontWeight: '700' },
-  rescheduleNowCol: { flex: 1, backgroundColor: 'rgba(5,46,22,0.5)', borderRadius: 8, padding: 7 },
-  rescheduleNowLabel: { fontSize: 10, fontWeight: '700', color: '#6EE7B7', marginBottom: 2, letterSpacing: 0.5 },
-  rescheduleNowTime: { fontSize: 12, fontWeight: '700', color: '#4ADE80' },
-  rescheduleNowRoom: { fontSize: 11, fontWeight: '600', color: C.successLt, marginTop: 1 },
-
-  //  Online info block 
-  onlineInfoBlock: { marginTop: 8, backgroundColor: 'rgba(8,145,178,0.12)', borderRadius: 8, padding: 10, borderWidth: 1, borderColor: 'rgba(8,145,178,0.35)' },
-  onlineBadge: { alignSelf: 'flex-start', backgroundColor: '#0891B2', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, marginBottom: 6 },
-  onlineBadgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
-  onlineTimeText: { fontSize: 13, fontWeight: '600', color: '#38BDF8', marginBottom: 4 },
-  onlineLinkText: { fontSize: 12, color: '#7DD3FC', fontStyle: 'italic' },
-
-  //  Merged group card 
-  mergedGroupCard: { borderTopWidth: 1, borderTopColor: C.border, paddingTop: 10, marginTop: 8, backgroundColor: 'rgba(13,148,136,0.10)', borderWidth: 1, borderColor: 'rgba(45,212,191,0.3)', borderRadius: 10, padding: 12 },
-  mergedGroupHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 8 },
-  mergedGroupTitle: { fontSize: 13, fontWeight: '700', color: C.tealLt },
-  mergedGroupSubtitle: { fontSize: 12, color: '#5EEAD4', marginTop: 2 },
-  mergedGroupSectionRow: { borderTopWidth: 1, borderTopColor: 'rgba(45,212,191,0.2)', paddingTop: 6, marginTop: 6 },
-  mergedGroupSectionUnit: { fontSize: 13, fontWeight: '600', color: '#D1D5DB' },
-  mergedGroupFooter: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(45,212,191,0.2)', gap: 3 },
-  mergedGroupMeta: { fontSize: 12, color: '#5EEAD4', fontWeight: '500' },
-  mergedGroupNote: { fontSize: 11, color: C.tealLt, fontStyle: 'italic' },
-  mergedByAdminBadge: { backgroundColor: 'rgba(124,58,237,0.2)', borderWidth: 1, borderColor: 'rgba(124,58,237,0.5)', borderRadius: 5, paddingHorizontal: 6, paddingVertical: 2 },
-  mergedByAdminBadgeText: { fontSize: 10, fontWeight: '700', color: C.purpleLt },
-  mergedByLecturerBadge: { backgroundColor: 'rgba(21,128,61,0.2)', borderWidth: 1, borderColor: 'rgba(21,128,61,0.5)', borderRadius: 5, paddingHorizontal: 6, paddingVertical: 2 },
-  mergedByLecturerBadgeText: { fontSize: 10, fontWeight: '700', color: '#4ADE80' },
-
-  //  Dropdown sheet (lesson type & status) 
-  dropdownOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  dropdownSheet: { backgroundColor: C.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 36, borderTopWidth: 1, borderColor: C.border },
-  dropdownSheetTitle: { fontSize: 15, fontWeight: '700', color: C.textPri, marginBottom: 4 },
-  dropdownSheetSubtitle: { fontSize: 12, color: C.textMuted, marginBottom: 14 },
-  dropdownOption: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 14, borderRadius: 12, borderWidth: 1, borderColor: C.border, marginBottom: 8, backgroundColor: C.bgSec },
-  dropdownOptionDot: { width: 10, height: 10, borderRadius: 5 },
-  dropdownOptionText: { flex: 1, fontSize: 14, fontWeight: '600', color: C.textPri },
-  dropdownOptionCheck: { fontSize: 16, fontWeight: '700' },
-  lessonTypeCodeLabel: { fontSize: 11, fontWeight: '600', color: C.textMuted, marginRight: 2 },
-
-  //  Bottom sheet modal 
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' },
-  actionSheet: { backgroundColor: C.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 36, borderTopWidth: 1, borderColor: C.border, maxHeight: '85%' },
-  actionSheetHandle: { width: 40, height: 4, backgroundColor: C.borderMed, borderRadius: 2, alignSelf: 'center', marginBottom: 16 },
-  actionSheetTitle: { fontSize: 17, fontWeight: '700', color: C.textPri, marginBottom: 6 },
-  actionSheetSubtitle: { fontSize: 13, color: C.textMuted, marginBottom: 14, lineHeight: 18 },
-
-  //  Text inputs 
-  reasonInput: { borderWidth: 1, borderColor: C.borderMed, borderRadius: 10, padding: 12, fontSize: 14, color: C.textPri, backgroundColor: C.bg, textAlignVertical: 'top', minHeight: 100, marginBottom: 4 },
-  charCount: { fontSize: 11, color: C.textMuted, textAlign: 'right', marginBottom: 16 },
-  timeInput: { borderWidth: 1, borderColor: C.borderMed, borderRadius: 10, padding: 12, backgroundColor: C.bg, marginBottom: 4 },
-  timeInputText: { fontSize: 14, color: C.textPri, fontWeight: '600' },
-  timeInputPlaceholder: { fontSize: 14, color: C.textMuted },
-  roomSearchInput: { borderWidth: 1, borderColor: C.borderMed, borderRadius: 10, padding: 10, fontSize: 14, color: C.textPri, backgroundColor: C.bg, marginBottom: 8 },
-
-  //  Confirm / back buttons 
-  confirmBtn: { borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginBottom: 10 },
-  confirmBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
-  backBtn: { borderWidth: 1, borderColor: C.borderMed, borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
-  backBtnText: { color: C.textSec, fontSize: 14, fontWeight: '600' },
-
-  //  Form fields 
-  fieldLabel: { fontSize: 13, fontWeight: '600', color: C.textSec, marginBottom: 6, marginTop: 8 },
-  optionalLabel: { fontWeight: '400', color: C.textMuted },
-
-  //  Reschedule type row 
-  rescheduleTypeRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
-  rescheduleTypeBtn: { flex: 1, borderWidth: 1.5, borderColor: C.borderMed, borderRadius: 10, paddingVertical: 10, alignItems: 'center', backgroundColor: C.bgSec },
-  rescheduleTypeBtnActive: { borderColor: C.primary, backgroundColor: 'rgba(99,102,241,0.15)' },
-  rescheduleTypeBtnText: { fontSize: 14, fontWeight: '600', color: C.textSec },
-  rescheduleTypeBtnTextActive: { color: C.primaryLt },
-  rescheduleTypeNote: { fontSize: 12, color: C.textMuted, marginBottom: 14, lineHeight: 17 },
-
-  //  Day picker 
-  dayPickerRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 4 },
-  dayPill: { borderWidth: 1, borderColor: C.borderMed, borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: C.bgSec },
-  dayPillActive: { borderColor: C.primary, backgroundColor: 'rgba(99,102,241,0.15)' },
-  dayPillText: { fontSize: 13, fontWeight: '600', color: C.textSec },
-  dayPillTextActive: { color: C.primaryLt },
-
-  //  Step indicator 
-  stepRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
-  stepDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: C.borderMed },
-  stepDotActive: { backgroundColor: C.primary },
-  stepLine: { width: 40, height: 2, backgroundColor: C.border, marginHorizontal: 4 },
-  stepLineActive: { backgroundColor: C.primary },
-
-  //  Room picker 
-  roomSummaryText: { fontSize: 14, fontWeight: '600', color: C.primaryLt, marginBottom: 12, textAlign: 'center' },
-  roomList: { maxHeight: 240 },
-  roomItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: C.border, borderRadius: 10, padding: 12, marginBottom: 8, backgroundColor: C.bgSec },
-  roomItemSelected: { borderColor: C.primary, backgroundColor: 'rgba(99,102,241,0.12)' },
-  roomItemLeft: { flex: 1 },
-  roomCode: { fontSize: 14, fontWeight: '700', color: C.textPri },
-  roomCodeSelected: { color: C.primaryLt },
-  roomMeta: { fontSize: 12, color: C.textMuted, marginTop: 2 },
-  roomCheck: { fontSize: 18, fontWeight: '700', color: C.primary },
-  noRoomsWrap: { alignItems: 'center', paddingVertical: 24 },
-  noRoomsText: { fontSize: 14, fontWeight: '600', color: C.textSec },
-  noRoomsHint: { fontSize: 12, color: C.textMuted, marginTop: 4 },
-  roomSearchError: { color: C.dangerLt, fontSize: 12, marginTop: 8, textAlign: 'center' },
-
-  //  Delegate modal 
-  noGroupsWrap: { alignItems: 'center', paddingVertical: 16 },
-  noGroupsText: { fontSize: 14, fontWeight: '600', color: C.textSec },
-  noGroupsHint: { marginTop: 4, fontSize: 12, color: C.textMuted },
-  delegateGroupRow: { borderWidth: 1, borderColor: 'rgba(16,185,129,0.25)', borderRadius: 10, padding: 10, marginBottom: 6, backgroundColor: 'rgba(16,185,129,0.08)' },
-  delegateGroupName: { fontSize: 14, fontWeight: '700', color: '#4ADE80' },
-  delegateGroupLeader: { fontSize: 12, color: C.successLt, marginTop: 2 },
-  delegateError: { color: C.dangerLt, fontSize: 13, marginTop: 8, marginBottom: 4 },
-
-  //  Merge modal 
-  mergeSelectionHint: { fontSize: 11, color: C.textMuted, marginBottom: 8, fontStyle: 'italic' },
-  mergeSectionRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', borderWidth: 1, borderColor: 'rgba(45,212,191,0.2)', borderRadius: 10, padding: 10, marginBottom: 6, backgroundColor: 'rgba(13,148,136,0.08)' },
-  mergeSectionRowSelected: { borderColor: 'rgba(13,148,136,0.6)', backgroundColor: 'rgba(13,148,136,0.18)' },
-  mergeSectionLeft: { flex: 1, marginRight: 8 },
-  mergeSectionUnit: { fontSize: 13, fontWeight: '700', color: '#F0F0F5' },
-  mergeSectionUnitDimmed: { color: C.textMuted },
-  mergeSectionCourse: { fontSize: 11, color: C.tealLt, marginTop: 1, fontWeight: '500' },
-  mergeSectionMeta: { fontSize: 11, color: C.textMuted, marginTop: 2 },
-  mergeCheckbox: { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: 'rgba(255,255,255,0.2)', backgroundColor: '#1C1C2E', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  mergeCheckboxSelected: { borderColor: C.tealDk, backgroundColor: C.tealDk },
-  mergeCheckboxCheck: { fontSize: 13, fontWeight: '700', color: '#FFFFFF' },
-});

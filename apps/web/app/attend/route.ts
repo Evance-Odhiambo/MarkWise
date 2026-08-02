@@ -496,10 +496,10 @@ export async function GET(req: NextRequest) {
     status: 200,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      // Prevent the redirect page itself from being cached so session links stay fresh
       "Cache-Control": "no-store, max-age=0",
       "Pragma": "no-cache",
       "Expires": "0",
+      "Referrer-Policy": "no-referrer",
     },
   });
 }

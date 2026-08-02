@@ -503,6 +503,16 @@ const ensureAttendanceSchema = async () => {
     sync_attempts INTEGER NOT NULL DEFAULT 0
   );`);
 
+  // pending_online_submissions — offline queue for online attendance submits
+  await executeSql(`CREATE TABLE IF NOT EXISTS pending_online_submissions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    synced INTEGER NOT NULL DEFAULT 0,
+    sync_attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT
+  );`);
+
   // Add sync_attempts to pending_manual_marks and pending_session_ends for existing installs
   try {
     await executeSql('ALTER TABLE pending_manual_marks ADD COLUMN sync_attempts INTEGER NOT NULL DEFAULT 0;');
@@ -2185,6 +2195,62 @@ const incrementSessionEndSyncAttempts = async (id) => {
   } catch (_) {}
 };
 
+// ─── Online attendance submission offline queue ────────────────────────────────
+
+const addPendingOnlineSubmission = async ({ sessionId, error }) => {
+  await initDatabase();
+  if (!isSQLiteAvailable()) return;
+  try {
+    await executeSql(
+      `INSERT INTO pending_online_submissions (session_id, created_at, synced, sync_attempts, last_error)
+       VALUES (?, ?, 0, 0, ?)`,
+      [String(sessionId), Date.now(), error || null]
+    );
+  } catch (_) {}
+};
+
+const getUnsyncedOnlineSubmissions = async () => {
+  await initDatabase();
+  if (!isSQLiteAvailable()) return [];
+  try {
+    return await getAllAsync(
+      `SELECT id, session_id, created_at, sync_attempts, last_error
+       FROM pending_online_submissions
+       WHERE synced = 0 AND sync_attempts < 5
+       ORDER BY created_at ASC LIMIT 20`
+    );
+  } catch (_) {
+    return [];
+  }
+};
+
+const markOnlineSubmissionSynced = async (id) => {
+  await initDatabase();
+  if (!isSQLiteAvailable()) return;
+  try {
+    await executeSql(`UPDATE pending_online_submissions SET synced = 1 WHERE id = ?`, [id]);
+  } catch (_) {}
+};
+
+const incrementOnlineSubmissionSyncAttempts = async (id, error) => {
+  await initDatabase();
+  if (!isSQLiteAvailable()) return;
+  try {
+    await executeSql(
+      `UPDATE pending_online_submissions SET sync_attempts = sync_attempts + 1, last_error = ? WHERE id = ?`,
+      [error || null, id]
+    );
+  } catch (_) {}
+};
+
+const clearSyncedOnlineSubmissions = async () => {
+  await initDatabase();
+  if (!isSQLiteAvailable()) return;
+  try {
+    await executeSql(`DELETE FROM pending_online_submissions WHERE synced = 1`);
+  } catch (_) {}
+};
+
 // ─── Lecturer analytics helpers ───────────────────────────────────────────────
 
 /**
@@ -2309,6 +2375,12 @@ export default {
   getUnsyncedSessionEnds,
   markSessionEndSynced,
   incrementSessionEndSyncAttempts,
+  // Online attendance submission offline queue
+  addPendingOnlineSubmission,
+  getUnsyncedOnlineSubmissions,
+  markOnlineSubmissionSynced,
+  incrementOnlineSubmissionSyncAttempts,
+  clearSyncedOnlineSubmissions,
   // Offline content caches
   saveTimetableCache,
   getTimetableCache,

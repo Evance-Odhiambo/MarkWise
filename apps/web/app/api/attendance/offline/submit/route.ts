@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyStudentAccessToken } from "@/lib/studentAuthJwt";
 import { verifyRawPayload, type AttendanceSession } from "@/lib/attendanceCrypto";
+import { rateLimit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
@@ -10,6 +11,8 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
+
+const studentLimiter = rateLimit({ windowMs: 60_000, max: 5 });
 
 export function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: corsHeaders });
@@ -114,7 +117,16 @@ export async function POST(req: NextRequest) {
     // sessionStart arrives in ms — normalise to second-precision ms for DB
     const normalisedStartMs = Math.floor(sessionStart / 1000) * 1000;
 
-    // ── Step 2: Find session ─────────────────────────────────────────────
+    // ── Global student rate limit ─────────────────────────────────────────────
+    const { allowed: studentAllowed } = await studentLimiter("offline:" + studentId);
+    if (!studentAllowed) {
+      return NextResponse.json(
+        { message: "Too many attempts. Try again later.", reason: "RATE_LIMITED" },
+        { status: 429, headers: corsHeaders }
+      );
+    }
+
+    // ── Step 2: Find session ─────────────────────────────────────────────────
     const lectureRoomStripped = lectureRoom.replace(/\s+/g, "");
     const roomCandidates = new Set<string>([lectureRoom, lectureRoomStripped]);
 
